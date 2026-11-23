@@ -40,7 +40,7 @@ but their format may change; `api/v1` is the stable contract.
 
 1. Create a **public** GitHub repository and push this folder to it.
 2. **Actions** tab → enable workflows, then run **Collect weather data** manually
-   once (it also runs on a schedule, roughly every 10–15 minutes).
+   once (it also runs on a schedule, about every 15 minutes).
 3. **Settings → Pages** → Source: *Deploy from a branch* → Branch: `main`, folder `/ (root)`.
 4. The dashboard is then live at `https://<user>.github.io/<repo>/`.
 
