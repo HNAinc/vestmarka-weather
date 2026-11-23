@@ -38,6 +38,13 @@
   .day .c { color:var(--corr); font-size:12px; }
   .legend span { display:inline-block; margin-right:14px; font-size:12px; color:var(--muted); }
   .legend i { display:inline-block; width:18px; height:3px; margin-right:6px; vertical-align:middle; }
+  .snowhead { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .snowhead h2 { margin:0; }
+  .banner { background:#101923; border:1px solid var(--border); border-left:5px solid var(--muted); border-radius:10px; padding:10px 14px; margin-bottom:14px; font-size:14px; line-height:1.5; }
+  .banner b { font-weight:650; }
+  .sw, .legend i.sw { display:inline-block; width:12px; height:12px; border-radius:3px; margin-right:6px; vertical-align:-1px; }
+  .panel .panel { background:#101923; }
+  table.windows { margin-top:4px; }
   footer { color:var(--muted); font-size:12px; text-align:center; padding:16px 24px 24px; }
   footer a { color:var(--yr); }
 </style>
@@ -67,6 +74,26 @@
 <main>
   <div class="warn" id="warn"></div>
   <div class="cards" id="cards"></div>
+  <div class="panel" id="snow" style="margin-bottom:20px">
+    <div class="snowhead">
+      <h2>Snowmaking – when to run the guns</h2>
+      <label class="sub">Equipment
+        <select id="nuc">
+          <option value="1">Fan guns with nucleator</option>
+          <option value="0">No nucleator (≈ 1 °C colder wet bulb needed)</option>
+        </select>
+      </label>
+    </div>
+    <div class="banner" id="snowBanner">Loading…</div>
+    <div class="cards" id="snowCards"></div>
+    <div style="margin-bottom:10px">
+      <div class="panel"><h2>Next 72 h: snowmaking capacity by hour (bars) and forecast wet bulb at Vestmarka (line, right axis)</h2>
+        <div class="legend" id="snowLegend"></div>
+        <div class="chartbox"><canvas id="c_snowplan"></canvas></div></div>
+    </div>
+    <div id="snowWindows"></div>
+    <div class="note" id="snowNote"></div>
+  </div>
   <div class="legend">
     <span><i style="background:var(--station)"></i>Vestmarka skianlegg (measured sensors; wet bulb derived from its temp + humidity + pressure)</span>
     <span><i style="background:#b784f5"></i>Wet bulb, Stull formula (the value jardar.no's page shows — also derived)</span>
@@ -415,6 +442,200 @@ function drawStats(s) {
     `Bias = station − yr.no. The prediction (orange) adds a learned offset to yr.no's forecast (multiplicative for wind): a blend of the long-run and recent (24 h half-life) bias, scaled by confidence = n/(n+12) hours, plus a time-of-day correction after 3+ days of data. Hours older than a week are folded into a small long-term summary that fades with a 180-day half-life, so the correction keeps converging (and following the seasons) without storing history. The shaded band is ±1 σ of the hourly residual. Wet bulb is computed psychrometrically (Arden Buck vapor pressure, iterative solve, water basis) using the station's measured absolute pressure — more accurate than the Stull formula shown on jardar.no, especially below 0 °C; yr.no's sea-level pressure is converted to station level first. The station exposes no history, so data has been collected periodically since ${first} – accuracy improves as data accumulates, and gaps occur while the collector is not running.`;
 }
 
+// ---------- snowmaking ----------
+// Rule-of-thumb model for fan guns. These are estimates, not measurements: tune SNOW to your
+// own guns and observations (the capacity curve varies a lot between guns and sites).
+const SNOW = {
+  limits: { marginal: -2, good: -4, excellent: -8 },   // wet bulb (°C) at or below which snowmaking is marginal / good / excellent
+  noNucleatorPenalty: 1,                               // °C extra cold needed without a nucleator
+  capacity: [[-10, 1], [-8, 0.85], [-6, 0.6], [-4, 0.3], [-3, 0.15], [-2, 0.05]], // wet bulb → typical gun output relative to its maximum
+};
+const CLASSES = {
+  none:      { label: 'Too warm',  color: '#4a5568' },
+  marginal:  { label: 'Marginal',  color: '#d29922' },
+  good:      { label: 'Good',      color: '#58a6ff' },
+  excellent: { label: 'Excellent', color: '#3fb950' },
+};
+
+function interp(pts, x) {
+  if (x <= pts[0][0]) return pts[0][1];
+  const last = pts[pts.length - 1];
+  if (x >= last[0]) return last[1];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
+    if (x >= x0 && x <= x1) return y0 + (y1 - y0) * (x - x0) / (x1 - x0);
+  }
+  return last[1];
+}
+
+function snowAt(wb, nuc) {
+  const w = wb + (nuc ? 0 : SNOW.noNucleatorPenalty);
+  const L = SNOW.limits;
+  const cls = w > L.marginal ? 'none' : w > L.good ? 'marginal' : w > L.excellent ? 'good' : 'excellent';
+  return { cls, cap: cls === 'none' ? 0 : interp(SNOW.capacity, w) };
+}
+
+function hourlyPlan(s, hours, nuc) {
+  const pts = s.forecast;
+  const plan = [];
+  if (!pts.length) return plan;
+  const t0 = Math.floor(s.now / HOUR) * HOUR;
+  let j = 0;
+  for (let h = 0; h < hours; h++) {
+    const t = t0 + h * HOUR;
+    while (j + 1 < pts.length && pts[j + 1].t <= t) j++;
+    const p = pts[j];
+    if (p.t > t || t - p.t > 6 * HOUR || p.corrected.wb == null) continue;
+    plan.push({ t, wb: p.corrected.wb, wind: p.corrected.wind, hum: p.corrected.hum, temp: p.corrected.temp, ...snowAt(p.corrected.wb, nuc) });
+  }
+  return plan;
+}
+
+const RANK = { none: 0, marginal: 1, good: 2, excellent: 3 };
+
+// Contiguous runs of hours worth running the guns: good or better if the forecast has any,
+// otherwise marginal. Best (highest total capacity) first.
+function findWindows(plan) {
+  const minRank = plan.some(p => RANK[p.cls] >= RANK.good) ? RANK.good : RANK.marginal;
+  const runs = [];
+  let cur = null;
+  for (const p of plan) {
+    if (RANK[p.cls] < minRank) { cur = null; continue; }
+    if (cur && p.t - cur.hours[cur.hours.length - 1].t === HOUR) cur.hours.push(p);
+    else { cur = { hours: [p] }; runs.push(cur); }
+  }
+  const avg = (a, f) => a.reduce((x, p) => x + f(p), 0) / a.length;
+  return runs.map(r => ({
+    start: r.hours[0].t, end: r.hours[r.hours.length - 1].t + HOUR, n: r.hours.length,
+    wb: avg(r.hours, p => p.wb), cap: avg(r.hours, p => p.cap),
+    score: r.hours.reduce((x, p) => x + p.cap, 0),
+    cls: r.hours.reduce((c, p) => (RANK[p.cls] > RANK[c] ? p.cls : c), 'marginal'),
+    minRank,
+  })).sort((a, b) => b.score - a.score);
+}
+
+const dayHour = t => new Date(t).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const range = w => `${dayHour(w.start)} – ${dayHour(w.end)}`;
+const pct = v => Math.round(v * 100) + ' %';
+let snowChart = null, snowPlanCache = [];
+
+function ensureSnowCharts() {
+  if (snowChart) return;
+  const tick = '#8b9bab', grid = '#223';
+  snowChart = new Chart(document.getElementById('c_snowplan'), {
+    type: 'bar',
+    data: { labels: [], datasets: [] },
+    options: {
+      animation: false, responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: tick, maxTicksLimit: 12, maxRotation: 0 }, grid: { display: false } },
+        y: { min: 0, max: 100, ticks: { color: tick, callback: v => v + ' %' }, grid: { color: grid }, title: { display: true, text: 'Gun capacity', color: tick } },
+        y2: { position: 'right', reverse: true, min: -14, max: 2, ticks: { color: '#b784f5' }, grid: { display: false }, title: { display: true, text: 'Wet bulb (°C), colder = up', color: '#b784f5' } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: {
+          title: items => dayHour(snowPlanCache[items[0].dataIndex].t),
+          label: item => item.dataset.yAxisID === 'y2' ? `Wet bulb ${fmt(item.parsed.y)} °C` : `Capacity ${Math.round(item.parsed.y)} %`,
+          afterBody: items => {
+            const p = snowPlanCache[items[0].dataIndex];
+            return [`${CLASSES[p.cls].label}`, `Wind ${fmt(p.wind)} m/s · RH ${fmt(p.hum, 0)} %`];
+          },
+        } },
+      },
+    },
+  });
+}
+
+function drawSnow(s) {
+  ensureSnowCharts();
+  const nuc = document.getElementById('nuc').value === '1';
+  const limit = x => fmt(x - (nuc ? 0 : SNOW.noNucleatorPenalty), 0);
+  const L = s.latest;
+  const plan = hourlyPlan(s, 72, nuc);
+  snowPlanCache = plan;
+  const wins = findWindows(plan);
+  const best = wins[0];
+  const next24 = plan.slice(0, 24);
+  const productive24 = next24.filter(p => p.cls !== 'none').length;
+  const good24 = next24.filter(p => p.cls === 'good' || p.cls === 'excellent').length;
+  const nowSnow = L && L.wb != null ? snowAt(L.wb, nuc) : null;
+
+  // measured last 24 h (hourly means of the station)
+  const byH = new Map();
+  for (const p of station) {
+    if (p.t < s.now - 24 * HOUR || p.wb == null) continue;
+    const h = Math.floor(p.t / HOUR);
+    if (!byH.has(h)) byH.set(h, []);
+    byH.get(h).push(p);
+  }
+  const past = [...byH.values()].map(a => snowAt(a.reduce((x, p) => x + p.wb, 0) / a.length, nuc));
+  const pastProd = past.filter(p => p.cls !== 'none');
+
+  // banner
+  const banner = document.getElementById('snowBanner');
+  if (best) {
+    banner.style.borderLeftColor = CLASSES[best.cls].color;
+    const nowTxt = nowSnow && nowSnow.cls !== 'none' ? `Right now conditions are <b>${CLASSES[nowSnow.cls].label.toLowerCase()}</b> (wet bulb ${fmt(L.wb)} °C). ` : '';
+    banner.innerHTML = `${nowTxt}<b>Focus snow production ${range(best)}</b> (${best.n} h): average wet bulb ${fmt(best.wb)} °C at ~${pct(best.cap)} gun capacity.` +
+      (wins.length > 1 ? ` ${wins.length - 1} other window${wins.length > 2 ? 's' : ''} in the next 72 h – see below.` : '') +
+      (best.minRank === RANK.marginal ? ' Only marginal hours are expected, so output will be low and the snow wet.' : '');
+  } else {
+    const coldest = plan.length ? Math.min(...plan.map(p => p.wb)) : null;
+    banner.style.borderLeftColor = CLASSES.none.color;
+    banner.innerHTML = plan.length
+      ? `<b>No productive snowmaking hours in the next 72 h.</b> The forecast wet bulb at Vestmarka stays above ${limit(SNOW.limits.marginal)} °C (coldest ${fmt(coldest)} °C).`
+      : 'Waiting for forecast data…';
+  }
+
+  // key numbers
+  const card = (label, big, color, rows) => `<div class="card"><div class="label">${label}</div>
+    <div class="big" style="color:${color}">${big}</div>${rows.map(([a, b]) => `<div class="row"><span>${a}</span><b>${b}</b></div>`).join('')}</div>`;
+  const cards = [];
+  if (nowSnow) {
+    cards.push(card('Snowmaking now', CLASSES[nowSnow.cls].label, CLASSES[nowSnow.cls].color, [
+      ['Wet bulb (station)', `${fmt(L.wb)} °C`],
+      ['Limit for snowmaking', `≤ ${limit(SNOW.limits.marginal)} °C`],
+      ['Gun capacity', pct(nowSnow.cap)],
+    ]));
+  }
+  cards.push(card('Next 24 h', `${productive24} productive h`, productive24 ? CLASSES[good24 ? 'good' : 'marginal'].color : CLASSES.none.color, [
+    ['Good or better hours', `${good24} h`],
+    ['Coldest wet bulb', next24.length ? `${fmt(Math.min(...next24.map(p => p.wb)))} °C` : '–'],
+  ]));
+  if (best) {
+    cards.push(card('Best window (72 h)', `${best.n} h`, CLASSES[best.cls].color, [
+      ['When', range(best)],
+      ['Avg wet bulb', `${fmt(best.wb)} °C`],
+      ['Gun capacity', pct(best.cap)],
+    ]));
+  }
+  cards.push(card('Last 24 h (measured)', `${pastProd.length} productive h`, pastProd.length ? CLASSES.good.color : CLASSES.none.color, [
+    ['Hours with data', `${past.length}`],
+  ]));
+  document.getElementById('snowCards').innerHTML = cards.join('');
+
+  // hourly capacity chart
+  snowChart.data.labels = plan.map(p => new Date(p.t).toLocaleDateString([], { weekday: 'short' }) + ' ' + String(new Date(p.t).getHours()).padStart(2, '0'));
+  snowChart.data.datasets = [
+    { type: 'bar', label: 'Capacity', data: plan.map(p => Math.round(p.cap * 100)), backgroundColor: plan.map(p => CLASSES[p.cls].color), borderWidth: 0, categoryPercentage: 1, barPercentage: 0.95, yAxisID: 'y' },
+    { type: 'line', label: 'Wet bulb', data: plan.map(p => p.wb), borderColor: '#b784f5', backgroundColor: '#b784f5', borderWidth: 2, pointRadius: 0, tension: 0.2, yAxisID: 'y2' },
+  ];
+  snowChart.update('none');
+  document.getElementById('snowLegend').innerHTML = Object.values(CLASSES).map(c => `<span><i class="sw" style="background:${c.color}"></i>${c.label}</span>`).join('')
+    + `<span><i style="background:#b784f5"></i>Forecast wet bulb (corrected to Vestmarka)</span>`;
+
+  // best windows table
+  document.getElementById('snowWindows').innerHTML = wins.length
+    ? `<table class="windows"><tr><th>Production window (next 72 h)</th><th>Hours</th><th>Avg wet bulb</th><th>Gun capacity</th><th>Rating</th></tr>${
+      wins.slice(0, 4).map(w => `<tr><td>${range(w)}</td><td>${w.n}</td><td>${fmt(w.wb)} °C</td><td>${pct(w.cap)}</td><td><i class="sw" style="background:${CLASSES[w.cls].color}"></i>${CLASSES[w.cls].label}</td></tr>`).join('')}</table>` : '';
+  const L2 = SNOW.limits;
+  document.getElementById('snowNote').innerHTML =
+    `Rules of thumb for fan guns, not measurements. Classes use the wet bulb (corrected forecast): ≤ ${limit(L2.marginal)} °C marginal (wet, heavy snow), ≤ ${limit(L2.good)} °C good, ≤ ${limit(L2.excellent)} °C excellent (dry, light snow)` +
+    `${nuc ? '' : ' – these include the extra cold needed without a nucleator'}. ` +
+    `Gun capacity is the typical output at that wet bulb relative to the gun's maximum. Adjust the SNOW constants in index.html to your own guns and observations.`;
+}
+
 function downloadCsv() {
   const cols = ['t', 'temp', 'hum', 'dew', 'feels', 'wb', 'wbStull', 'wind', 'gust', 'dir', 'press', 'pressAbs', 'rain', 'rainRate'];
   const lines = [cols.join(',')].concat(station.map(s => cols.map(c => c === 't' ? new Date(s.t).toISOString() : (s[c] ?? '')).join(',')));
@@ -451,7 +672,9 @@ async function refresh() {
   try {
     await loadData();
     const s = buildState(Number(document.getElementById('hours').value));
-    ensureCharts(); drawCards(s); drawCharts(s); drawDays(s); drawStats(s);
+    ensureCharts(); drawCards(s);
+    try { drawSnow(s); } catch (e) { console.error('snowmaking panel:', e); }
+    drawCharts(s); drawDays(s); drawStats(s);
     const warn = document.getElementById('warn');
     const age = s.latest ? Date.now() - s.latest.t : null;
     if (age == null) { warn.style.display = 'block'; warn.textContent = 'No station data collected yet.'; }
@@ -461,6 +684,9 @@ async function refresh() {
       `Station sample ${s.latest ? new Date(s.latest.t).toLocaleString() : '–'} · yr.no forecast issued ${s.yrCreated ? new Date(s.yrCreated).toLocaleString() : '–'} · page refreshes every 60 s`;
   } catch (e) { document.getElementById('sub').textContent = 'Error: ' + e.message; }
 }
+const nucSelect = document.getElementById('nuc');
+nucSelect.value = localStorage.getItem('nucleator') || '1';
+nucSelect.addEventListener('change', () => { localStorage.setItem('nucleator', nucSelect.value); refresh(); });
 document.getElementById('hours').addEventListener('change', refresh);
 document.getElementById('fchours').addEventListener('change', refresh);
 document.getElementById('csv').addEventListener('click', downloadCsv);

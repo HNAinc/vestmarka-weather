@@ -1,7 +1,8 @@
 'use strict';
-// Local development/standalone server: serves the static dashboard and runs the
-// collector every 5 minutes. The hosted (GitHub Pages) version uses the same
-// index.html with data committed by .github/workflows/collect.yml instead.
+// Local development/standalone server: serves the static dashboard from the local data/
+// files. It only collects (every 5 minutes) when started with COLLECT=1; the hosted
+// version is fed by .github/workflows/collect.yml, so local runs must not write to data/
+// (that would conflict with the bot's commits).
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -32,7 +33,9 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Dashboard: http://localhost:${PORT}`);
-  tick();
-  setInterval(tick, SAMPLE_MS);
+  console.log(`Dashboard: http://localhost:${PORT}` + (process.env.COLLECT === '1' ? ' (collecting every 5 min)' : ' (read-only, not collecting)'));
+  if (process.env.COLLECT === '1') {
+    tick();
+    setInterval(tick, SAMPLE_MS);
+  }
 });

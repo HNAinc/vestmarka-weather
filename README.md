@@ -17,7 +17,11 @@ history accumulates in [`data/`](data/):
 - `data/yr_latest.json` – most recent full forecast + daily outlook
 
 The dashboard ([`index.html`](index.html)) is fully static: it fetches those files
-and computes all statistics and corrections in the browser.
+and computes all statistics and corrections in the browser. It also has a **snowmaking
+panel**: classifies each forecast hour by wet bulb (marginal / good / excellent), shows the
+best production windows for the next 72 h and the relative gun capacity. These are
+rule-of-thumb estimates; tune the `SNOW` constants in `index.html` (wet bulb limits, capacity
+curve) to your own guns.
 
 ## JSON API (for other dashboards)
 
@@ -43,12 +47,15 @@ but their format may change; `api/v1` is the stable contract.
 ## Run locally
 
 ```
+git pull
 npm start
 ```
 
-Serves the dashboard on <http://localhost:3000> and samples the station every
-5 minutes while running. (`--use-system-ca` is used so Node trusts the
-corporate/system certificate store on Windows.)
+Serves the dashboard on <http://localhost:3000> from the local `data/` files, read-only.
+The data is collected by the GitHub workflow, so `git pull` first to get the latest, and
+never commit `data/` or `api/` from a local machine. To collect locally instead (for
+example without GitHub), start with `COLLECT=1 npm start`. (`--use-system-ca` is used so
+Node trusts the corporate/system certificate store on Windows.)
 
 ## Data sources and attribution
 
