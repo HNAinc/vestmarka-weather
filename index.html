@@ -446,9 +446,9 @@ function drawStats(s) {
 // Rule-of-thumb model for fan guns. These are estimates, not measurements: tune SNOW to your
 // own guns and observations (the capacity curve varies a lot between guns and sites).
 const SNOW = {
-  limits: { marginal: -3, good: -4, excellent: -6 },   // wet bulb (°C) at or below which snowmaking is marginal / good / great; warmer = no go
+  limits: { marginal: -3, good: -3.5, excellent: -6 },   // wet bulb (°C) at or below which snowmaking is marginal / good / great; warmer = no go
   noNucleatorPenalty: 1,                               // °C extra cold needed without a nucleator
-  capacity: [[-10, 1], [-8, 0.85], [-6, 0.65], [-4, 0.35], [-3, 0.05]], // wet bulb → typical gun output relative to its maximum
+  capacity: [[-10, 1], [-8, 0.85], [-6, 0.65], [-4, 0.35], [-3.5, 0.2], [-3, 0.05]], // wet bulb → typical gun output relative to its maximum
 };
 const CLASSES = {
   none:      { label: 'Too warm',  color: '#4a5568' },
