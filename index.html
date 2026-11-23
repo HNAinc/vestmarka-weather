@@ -129,7 +129,7 @@ const VARS = [
   { key: 'press', label: 'Pressure', unit: 'hPa', mode: 'add' },
 ];
 
-let station = [], yrHourly = {}, yrLatest = null, archiveCache = { at: 0, rows: [] };
+let station = [], yrHourly = {}, yrLatest = null, learned = null;
 
 function yrAt(t, key, keys) {
   let lo = -1;
@@ -167,48 +167,67 @@ function buildPairs(keys) {
   return pairs;
 }
 
+// Long-term summary (data/learned.json, written daily by collect.js): decayed sums for all
+// hours before learned.foldedUntil. Hours after that are paired live from the raw files.
+// Sum layout and addPair/scaleAcc are mirrored in collect.js.
+const emptyAcc = () => ({ W: 0, Sd: 0, Sdd: 0, Sabs: 0, Sx: 0, Sy: 0, Sxx: 0, Syy: 0, Sxy: 0, Rw: 0, Rs: 0, hw: Array(24).fill(0), hd: Array(24).fill(0) });
+function scaleAcc(a, f) {
+  const o = {};
+  for (const [k, v] of Object.entries(a)) o[k] = Array.isArray(v) ? v.map(x => x * f) : v * f;
+  return o;
+}
+function addPair(a, st, yr, w, hour) {
+  const d = st - yr;
+  a.W += w; a.Sd += w * d; a.Sdd += w * d * d; a.Sabs += w * Math.abs(d);
+  a.Sx += w * yr; a.Sy += w * st; a.Sxx += w * yr * yr; a.Syy += w * st * st; a.Sxy += w * yr * st;
+  if (yr > 0.3) { a.Rw += w; a.Rs += w * st / yr; }
+  a.hw[hour] += w; a.hd[hour] += w * d;
+}
+
 function computeStats(pairs) {
   const out = {};
   const now = Date.now();
   const halfLife = 24 * HOUR;
+  const longHL = (learned ? learned.halfLifeDays : 180) * 24 * HOUR;
+  const from = learned ? learned.foldedUntil : 0;
   for (const v of VARS) {
-    const rows = pairs.filter(p => p[v.key]).map(p => ({ t: p.t, ...p[v.key] }));
-    const n = rows.length;
-    if (!n) { out[v.key] = { n: 0 }; continue; }
-    const diffs = rows.map(r => r.st - r.yr);
-    const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
-    const bias = mean(diffs);
-    const mae = mean(diffs.map(Math.abs));
-    const rmse = Math.sqrt(mean(diffs.map(d => d * d)));
-    const sd = n > 1 ? Math.sqrt(mean(diffs.map(d => (d - bias) ** 2)) * n / (n - 1)) : 0;
-    const ratios = rows.filter(r => r.yr > 0.3).map(r => r.st / r.yr);
+    const A = learned && learned.vars[v.key] ? scaleAcc(learned.vars[v.key], Math.pow(0.5, (now - from) / longHL)) : emptyAcc();
+    const rows = pairs.filter(p => p[v.key] && p.t >= from).map(p => ({ t: p.t, ...p[v.key] }));
+    for (const r of rows) addPair(A, r.st, r.yr, Math.pow(0.5, (now - r.t) / longHL), new Date(r.t).getUTCHours());
+    const n = A.W;
+    if (n < 0.5) { out[v.key] = { n: 0 }; continue; }
+    const bias = A.Sd / n;
+    const mae = A.Sabs / n;
+    const rmse = Math.sqrt(A.Sdd / n);
+    const sd = n > 1 ? Math.sqrt(Math.max(0, A.Sdd / n - bias * bias) * n / (n - 1)) : 0;
     let w = 0, wb = 0, wr = 0, wrw = 0;
-    rows.forEach((r, i) => { const wt = Math.pow(0.5, (now - r.t) / halfLife); w += wt; wb += wt * diffs[i]; });
-    rows.forEach(r => { if (r.yr > 0.3) { const wt = Math.pow(0.5, (now - r.t) / halfLife); wrw += wt; wr += wt * (r.st / r.yr); } });
-    const mx = mean(rows.map(r => r.yr)), my = mean(rows.map(r => r.st));
-    let sxx = 0, sxy = 0, syy = 0;
-    for (const r of rows) { sxx += (r.yr - mx) ** 2; sxy += (r.yr - mx) * (r.st - my); syy += (r.st - my) ** 2; }
-    const corr = sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
+    for (const r of rows) {
+      const wt = Math.pow(0.5, (now - r.t) / halfLife);
+      w += wt; wb += wt * (r.st - r.yr);
+      if (r.yr > 0.3) { wrw += wt; wr += wt * (r.st / r.yr); }
+    }
+    const sxx = A.Sxx - A.Sx * A.Sx / n, syy = A.Syy - A.Sy * A.Sy / n, sxy = A.Sxy - A.Sx * A.Sy / n;
     out[v.key] = {
-      n, bias, mae, rmse, sd, corr,
-      slope: sxx > 0 ? sxy / sxx : null,
+      n, bias, mae, rmse, sd,
+      corr: sxx > 1e-6 && syy > 1e-6 ? sxy / Math.sqrt(sxx * syy) : null,
+      slope: sxx > 1e-6 ? sxy / sxx : null,
       recentBias: w ? wb / w : bias,
-      ratio: ratios.length ? mean(ratios) : 1,
+      ratio: A.Rw ? A.Rs / A.Rw : 1,
       recentRatio: wrw ? wr / wrw : 1,
-      hours: rows,
+      hod: { w: A.hw, d: A.hd },
     };
   }
   return out;
 }
 
-function diurnalBias(st, key, hourOfDay) {
-  const rows = st[key].hours || [];
-  const days = new Set(rows.map(r => new Date(r.t).toDateString())).size;
-  if (days < 3) return 0;
-  const near = rows.filter(r => { const d = Math.abs(new Date(r.t).getHours() - hourOfDay); return Math.min(d, 24 - d) <= 1; });
-  if (near.length < 3) return 0;
-  const m = near.reduce((a, r) => a + (r.st - r.yr), 0) / near.length;
-  return (m - st[key].bias) * (near.length / (near.length + 3));
+// Time-of-day bias from the hour-of-day buckets (UTC hours, i.e. tied to the sun, not to DST).
+function diurnalBias(st, key, hourUTC) {
+  const s = st[key];
+  if (!s.hod || s.n < 72) return 0;
+  let w = 0, d = 0;
+  for (let k = -1; k <= 1; k++) { const i = (hourUTC + k + 24) % 24; w += s.hod.w[i]; d += s.hod.d[i]; }
+  if (w < 3) return 0;
+  return (d / w - s.bias) * (w / (w + 3));
 }
 
 function correct(yrPoint, st, v) {
@@ -222,7 +241,7 @@ function correct(yrPoint, st, v) {
     y = x * (1 + (r - 1) * shrink);
   } else {
     const b = 0.5 * s.bias + 0.5 * s.recentBias;
-    y = x + b * shrink + diurnalBias(st, v.key, new Date(yrPoint.t).getHours()) * shrink;
+    y = x + b * shrink + diurnalBias(st, v.key, new Date(yrPoint.t).getUTCHours()) * shrink;
   }
   if (v.clamp) y = Math.min(v.clamp[1], Math.max(v.clamp[0], y));
   return y;
@@ -260,7 +279,7 @@ function buildState(hoursBack) {
   for (const v of VARS) {
     const s = st[v.key];
     summary[v.key] = s.n ? {
-      n: s.n, bias: round(s.bias, 2), recentBias: round(s.recentBias, 2), mae: round(s.mae, 2), rmse: round(s.rmse, 2),
+      n: Math.round(s.n), bias: round(s.bias, 2), recentBias: round(s.recentBias, 2), mae: round(s.mae, 2), rmse: round(s.rmse, 2),
       sd: round(s.sd, 2), corr: round(s.corr, 2), slope: round(s.slope, 2),
       confidence: round(s.n / (s.n + 12), 2),
     } : { n: 0 };
@@ -268,7 +287,7 @@ function buildState(hoursBack) {
   return {
     now, latest, yrNow, summary, forecast,
     station: stationSeries, yr: yrSeries,
-    sampleCount: station.reduce((a, s) => a + (s.n || 1), 0), firstSample: station.length ? station[0].t : null,
+    sampleCount: station.length, firstSample: learned && learned.since ? learned.since : (station.length ? station[0].t : null),
     yrCreated: yrLatest ? yrLatest.created : null,
   };
 }
@@ -393,7 +412,7 @@ function drawStats(s) {
     `<tr><th>Variable</th><th>Hours</th><th>Mean bias</th><th>Recent bias (24 h half-life)</th><th>MAE</th><th>RMSE</th><th>Correlation</th><th>Slope</th><th>Model confidence</th></tr>${rows}`;
   const first = s.firstSample ? new Date(s.firstSample).toLocaleString() : '–';
   document.getElementById('note').innerHTML =
-    `Bias = station − yr.no. The prediction (orange) adds a learned offset to yr.no's forecast (multiplicative for wind): a blend of the long-run and recent (24 h half-life) bias, scaled by confidence = n/(n+12) hours, plus a time-of-day correction after 3+ days of data. The shaded band is ±1 σ of the hourly residual. Wet bulb is computed psychrometrically (Arden Buck vapor pressure, iterative solve, water basis) using the station's measured absolute pressure — more accurate than the Stull formula shown on jardar.no, especially below 0 °C; yr.no's sea-level pressure is converted to station level first. The station exposes no history, so data has been collected periodically since ${first} (${s.sampleCount} samples) – accuracy improves as data accumulates, and gaps occur while the collector is not running.`;
+    `Bias = station − yr.no. The prediction (orange) adds a learned offset to yr.no's forecast (multiplicative for wind): a blend of the long-run and recent (24 h half-life) bias, scaled by confidence = n/(n+12) hours, plus a time-of-day correction after 3+ days of data. Hours older than a week are folded into a small long-term summary that fades with a 180-day half-life, so the correction keeps converging (and following the seasons) without storing history. The shaded band is ±1 σ of the hourly residual. Wet bulb is computed psychrometrically (Arden Buck vapor pressure, iterative solve, water basis) using the station's measured absolute pressure — more accurate than the Stull formula shown on jardar.no, especially below 0 °C; yr.no's sea-level pressure is converted to station level first. The station exposes no history, so data has been collected periodically since ${first} – accuracy improves as data accumulates, and gaps occur while the collector is not running.`;
 }
 
 function downloadCsv() {
@@ -408,22 +427,19 @@ function downloadCsv() {
 
 async function loadData() {
   const get = async (url, text) => {
-    const r = await fetch(url, { cache: 'no-store' });
+    // no-cache = revalidate with the server (ETag), so unchanged files cost a 304, not a download
+    const r = await fetch(url, { cache: 'no-cache' });
     if (!r.ok) throw new Error(url + ' -> HTTP ' + r.status);
     return text ? r.text() : r.json();
   };
-  // The hourly archive only changes once a day, so don't re-download it every refresh.
-  const archiveStale = Date.now() - archiveCache.at > 3600e3;
-  const [jsonl, archive, hourly, latest] = await Promise.all([
+  const [jsonl, hourly, latest, learnedJson] = await Promise.all([
     get('data/station.jsonl', true).catch(() => ''),
-    archiveStale ? get('data/station_hourly.jsonl', true).catch(() => null) : null,
     get('data/yr_hourly.json').catch(() => ({})),
     get('data/yr_latest.json').catch(() => null),
+    get('data/learned.json').catch(() => null),
   ]);
-  const parse = txt => txt.split('\n').filter(Boolean).map(l => JSON.parse(l));
-  if (archive != null) archiveCache = { at: Date.now(), rows: parse(archive) };
-  // older history is stored as hourly means (one row per hour, with `n` samples)
-  station = archiveCache.rows.concat(parse(jsonl)).sort((a, b) => a.t - b.t);
+  learned = learnedJson;
+  station = jsonl.split('\n').filter(Boolean).map(l => JSON.parse(l));
   // recompute derived values so all stored data uses the current formulas
   for (const s of station) { s.wb = round(wetBulb(s.temp, s.hum, s.pressAbs), 2); s.wbStull = round(wetBulbStull(s.temp, s.hum), 2); }
   yrHourly = hourly;

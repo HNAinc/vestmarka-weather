@@ -9,14 +9,12 @@ const UA = 'WetbulbDashboard/1.0 (github; personal weather comparison)';
 const STATION_URL = 'https://webkamera.jardar.no/weather.php';
 const YR_BASE = 'https://www.yr.no/api/v0/locations/1-73018';
 const YR_REFRESH_MS = 14 * 60 * 1000;
-const KEEP_DAYS = 60;
+const KEEP_DAYS = 30;
 const RAW_DAYS = 30;
-const ARCHIVE_DAYS = 365;
 const HOUR = 3600e3;
 
 const DATA_DIR = path.join(__dirname, 'data');
 const STATION_FILE = path.join(DATA_DIR, 'station.jsonl');
-const STATION_HOURLY_FILE = path.join(DATA_DIR, 'station_hourly.jsonl');
 const YR_HOURLY_FILE = path.join(DATA_DIR, 'yr_hourly.json');
 const YR_LATEST_FILE = path.join(DATA_DIR, 'yr_latest.json');
 
@@ -174,7 +172,6 @@ const readStationSamples = sinceMs => readJsonl(STATION_FILE, sinceMs);
 const writeJsonl = (file, rows) => fs.writeFileSync(file, rows.map(r => JSON.stringify(r) + '\n').join(''));
 
 // Hourly means keyed by UTC hour start (`t`); `n` is the number of samples averaged.
-// Rows keep the raw-sample shape so the dashboard can mix them with raw samples.
 function hourlyMeans(samples) {
   const buckets = new Map();
   for (const s of samples) {
@@ -183,7 +180,7 @@ function hourlyMeans(samples) {
     buckets.get(h).push(s);
   }
   return [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([h, arr]) => {
-    const row = { t: h, n: arr.reduce((a, s) => a + (s.n || 1), 0) };
+    const row = { t: h, n: arr.length };
     for (const k of MEAN_KEYS) {
       const v = arr.map(s => s[k]).filter(x => x != null && Number.isFinite(x));
       row[k] = v.length ? round(v.reduce((a, b) => a + b, 0) / v.length, 2) : null;
@@ -234,33 +231,102 @@ function writeApi() {
   });
 }
 
-// Keeps the repo bounded: raw samples older than RAW_DAYS (cut at a UTC midnight, so the
-// file is only rewritten once a day) are folded into hourly means in station_hourly.jsonl,
-// which in turn keeps only ARCHIVE_DAYS (yr_hourly, used for pairing, keeps just 60).
-function compactStation() {
+// Long-term memory of the bias model. Hours that leave the "live" window are folded once a
+// day into a fixed-size set of exponentially decayed sums (data/learned.json), so the
+// correction keeps converging without storing history. index.html combines this summary
+// with the hours after `foldedUntil` that it computes from the raw files. The sum layout
+// and pairing logic mirror computeStats()/buildPairs() in index.html.
+const LEARNED_FILE = path.join(DATA_DIR, 'learned.json');
+const FOLD_DAYS = 7;
+const LEARN_HALF_LIFE_DAYS = 180;
+const MODEL_KEYS = ['temp', 'wb', 'hum', 'wind', 'gust', 'press'];
+const DAY = 24 * HOUR;
+
+const emptyAcc = () => ({ W: 0, Sd: 0, Sdd: 0, Sabs: 0, Sx: 0, Sy: 0, Sxx: 0, Syy: 0, Sxy: 0, Rw: 0, Rs: 0, hw: Array(24).fill(0), hd: Array(24).fill(0) });
+function scaleAcc(a, f) {
+  const o = {};
+  for (const [k, v] of Object.entries(a)) o[k] = Array.isArray(v) ? v.map(x => x * f) : v * f;
+  return o;
+}
+function addPair(a, st, yr, w, hour) {
+  const d = st - yr;
+  a.W += w; a.Sd += w * d; a.Sdd += w * d * d; a.Sabs += w * Math.abs(d);
+  a.Sx += w * yr; a.Sy += w * st; a.Sxx += w * yr * yr; a.Syy += w * st * st; a.Sxy += w * yr * st;
+  if (yr > 0.3) { a.Rw += w; a.Rs += w * st / yr; }
+  a.hw[hour] += w; a.hd[hour] += w * d;
+}
+
+function yrAt(yrHourly, keys, t, key) {
+  let lo = -1;
+  for (let i = 0; i < keys.length; i++) { if (keys[i] <= t) lo = i; else break; }
+  const a = lo >= 0 ? keys[lo] : null;
+  const b = lo + 1 < keys.length ? keys[lo + 1] : null;
+  const va = a != null ? yrHourly[a][key] : null;
+  const vb = b != null ? yrHourly[b][key] : null;
+  if (va != null && vb != null && b - a <= 3 * HOUR) return va + (vb - va) * (t - a) / (b - a);
+  if (va != null && t - a <= HOUR) return va;
+  if (vb != null && b - t <= HOUR) return vb;
+  return null;
+}
+
+function foldLearned() {
+  const foldTo = Math.floor((Date.now() - FOLD_DAYS * DAY) / DAY) * DAY;
+  const raw = readStationSamples(0);
+  let learned = readJson(LEARNED_FILE, null);
+  if (!learned) {
+    if (!raw.length) return;
+    learned = { version: 1, halfLifeDays: LEARN_HALF_LIFE_DAYS, since: raw[0].t, foldedUntil: Math.floor(raw[0].t / DAY) * DAY, vars: {} };
+  }
+  const from = learned.foldedUntil;
+  if (foldTo <= from) return;
+  const hl = LEARN_HALF_LIFE_DAYS * DAY;
+  const yrHourly = readJson(YR_HOURLY_FILE, {});
+  for (const v of Object.values(yrHourly)) v.wb = wetBulb(v.temp, v.hum, stationPressure(v.press, v.temp));
+  const keys = Object.keys(yrHourly).map(Number).sort((a, b) => a - b);
+
+  const accs = {};
+  for (const k of MODEL_KEYS) accs[k] = learned.vars[k] ? scaleAcc(learned.vars[k], Math.pow(0.5, (foldTo - from) / hl)) : emptyAcc();
+  const buckets = new Map();
+  for (const s of raw) {
+    if (s.t < from || s.t >= foldTo) continue;
+    const h = Math.floor(s.t / HOUR) * HOUR;
+    if (!buckets.has(h)) buckets.set(h, []);
+    buckets.get(h).push({ ...s, wb: wetBulb(s.temp, s.hum, s.pressAbs) });
+  }
+  let hours = 0;
+  for (const [h, arr] of buckets) {
+    const mid = h + HOUR / 2;
+    const w = Math.pow(0.5, (foldTo - mid) / hl);
+    for (const k of MODEL_KEYS) {
+      const vals = arr.map(s => s[k]).filter(x => x != null && Number.isFinite(x));
+      const yr = yrAt(yrHourly, keys, mid, k);
+      if (vals.length && yr != null && Number.isFinite(yr)) addPair(accs[k], vals.reduce((a, b) => a + b, 0) / vals.length, yr, w, new Date(h).getUTCHours());
+    }
+    hours++;
+  }
+  learned.vars = accs;
+  learned.foldedUntil = foldTo;
+  const rounded = JSON.stringify(learned, (k, v) => (typeof v === 'number' ? Number(v.toPrecision(9)) : v));
+  fs.writeFileSync(LEARNED_FILE, rounded + '\n');
+  console.log(`learned: folded ${hours} hours up to ${new Date(foldTo).toISOString().slice(0, 10)}`);
+}
+
+// Keeps the repo bounded: only RAW_DAYS of samples (the longest range the dashboard shows)
+// are stored. The cut is at a UTC midnight, so the file is only rewritten once a day.
+function trimStation() {
   const cutoff = Math.floor((Date.now() - RAW_DAYS * 24 * HOUR) / (24 * HOUR)) * 24 * HOUR;
   const raw = readStationSamples(0);
-  const old = raw.filter(s => s.t < cutoff);
-  const archiveCutoff = Date.now() - ARCHIVE_DAYS * 24 * HOUR;
-  const archive = readJsonl(STATION_HOURLY_FILE, 0);
-  const trimmed = archive.filter(r => r.t >= archiveCutoff);
-  if (!old.length && trimmed.length === archive.length) return;
-  const merged = new Map(trimmed.map(r => [r.t, r]));
-  for (const r of hourlyMeans(old)) {
-    const prev = merged.get(r.t);
-    merged.set(r.t, prev ? hourlyMeans([prev, r])[0] : r);
-  }
-  const rows = [...merged.values()].filter(r => r.t >= archiveCutoff).sort((a, b) => a.t - b.t);
-  writeJsonl(STATION_HOURLY_FILE, rows);
-  writeJsonl(STATION_FILE, raw.filter(s => s.t >= cutoff));
-  console.log(`compact: ${old.length} raw samples -> hourly archive (${rows.length} hours)`);
+  const kept = raw.filter(s => s.t >= cutoff);
+  if (kept.length === raw.length) return;
+  writeJsonl(STATION_FILE, kept);
+  console.log(`trim: dropped ${raw.length - kept.length} samples older than ${RAW_DAYS} days`);
 }
 
 async function tick() {
   const results = await Promise.allSettled([sampleStation(), refreshYr(false)]);
   let failed = false;
   for (const r of results) if (r.status === 'rejected') { failed = true; console.error(r.reason.message); }
-  try { compactStation(); writeApi(); } catch (e) { failed = true; console.error('post-process:', e.message); }
+  try { foldLearned(); trimStation(); writeApi(); } catch (e) { failed = true; console.error('post-process:', e.message); }
   return !failed;
 }
 

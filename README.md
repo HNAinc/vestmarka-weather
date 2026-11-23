@@ -9,10 +9,11 @@ with a bias-corrected local forecast and psychrometric wet-bulb temperatures
 The station exposes no history, so a collector samples it periodically and the
 history accumulates in [`data/`](data/):
 
-- `data/station.jsonl` – raw station samples for the last 30 days
-- `data/station_hourly.jsonl` – hourly means of older samples (kept 1 year); compaction runs
-  once a day inside the collector, so the repo size stays bounded
-- `data/yr_hourly.json` – latest yr.no forecast per hour (kept 60 days)
+- `data/station.jsonl` – raw station samples for the last 30 days (older samples are dropped)
+- `data/yr_hourly.json` – latest yr.no forecast per hour (kept 30 days)
+- `data/learned.json` – fixed-size (~5 KB) long-term memory of the bias model: hours older than
+  a week are folded in once a day as exponentially decayed statistics (180-day half-life), so
+  the correction keeps converging without storing history
 - `data/yr_latest.json` – most recent full forecast + daily outlook
 
 The dashboard ([`index.html`](index.html)) is fully static: it fetches those files
