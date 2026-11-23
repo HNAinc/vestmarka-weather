@@ -268,7 +268,7 @@ function buildState(hoursBack) {
   return {
     now, latest, yrNow, summary, forecast,
     station: stationSeries, yr: yrSeries,
-    sampleCount: station.length, firstSample: station.length ? station[0].t : null,
+    sampleCount: station.reduce((a, s) => a + (s.n || 1), 0), firstSample: station.length ? station[0].t : null,
     yrCreated: yrLatest ? yrLatest.created : null,
   };
 }
@@ -412,12 +412,15 @@ async function loadData() {
     if (!r.ok) throw new Error(url + ' -> HTTP ' + r.status);
     return text ? r.text() : r.json();
   };
-  const [jsonl, hourly, latest] = await Promise.all([
+  const [jsonl, archive, hourly, latest] = await Promise.all([
     get('data/station.jsonl', true).catch(() => ''),
+    get('data/station_hourly.jsonl', true).catch(() => ''),
     get('data/yr_hourly.json').catch(() => ({})),
     get('data/yr_latest.json').catch(() => null),
   ]);
-  station = jsonl.split('\n').filter(Boolean).map(l => JSON.parse(l));
+  const parse = txt => txt.split('\n').filter(Boolean).map(l => JSON.parse(l));
+  // older history is stored as hourly means (one row per hour, with `n` samples)
+  station = parse(archive).concat(parse(jsonl)).sort((a, b) => a.t - b.t);
   // recompute derived values so all stored data uses the current formulas
   for (const s of station) { s.wb = round(wetBulb(s.temp, s.hum, s.pressAbs), 2); s.wbStull = round(wetBulbStull(s.temp, s.hum), 2); }
   yrHourly = hourly;

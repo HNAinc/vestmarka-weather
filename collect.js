@@ -10,10 +10,13 @@ const STATION_URL = 'https://webkamera.jardar.no/weather.php';
 const YR_BASE = 'https://www.yr.no/api/v0/locations/1-73018';
 const YR_REFRESH_MS = 14 * 60 * 1000;
 const KEEP_DAYS = 60;
+const RAW_DAYS = 8;
+const ARCHIVE_DAYS = 90;
 const HOUR = 3600e3;
 
 const DATA_DIR = path.join(__dirname, 'data');
 const STATION_FILE = path.join(DATA_DIR, 'station.jsonl');
+const STATION_HOURLY_FILE = path.join(DATA_DIR, 'station_hourly.jsonl');
 const YR_HOURLY_FILE = path.join(DATA_DIR, 'yr_hourly.json');
 const YR_LATEST_FILE = path.join(DATA_DIR, 'yr_latest.json');
 
@@ -157,9 +160,9 @@ const SOURCES = {
 const UNITS = { temp: '°C', wb: '°C', dew: '°C', feels: '°C', hum: '%', wind: 'm/s', gust: 'm/s', dir: '°', press: 'hPa (sea level)', pressAbs: 'hPa (station)', rain: 'mm (daily total)', rainRate: 'mm/h' };
 const MEAN_KEYS = ['temp', 'hum', 'dew', 'feels', 'wb', 'wbStull', 'wind', 'gust', 'press', 'pressAbs', 'rainRate'];
 
-function readStationSamples(sinceMs) {
+function readJsonl(file, sinceMs = 0) {
   let txt;
-  try { txt = fs.readFileSync(STATION_FILE, 'utf8'); } catch { return []; }
+  try { txt = fs.readFileSync(file, 'utf8'); } catch { return []; }
   const out = [];
   for (const line of txt.split('\n')) {
     if (!line) continue;
@@ -167,7 +170,11 @@ function readStationSamples(sinceMs) {
   }
   return out;
 }
+const readStationSamples = sinceMs => readJsonl(STATION_FILE, sinceMs);
+const writeJsonl = (file, rows) => fs.writeFileSync(file, rows.map(r => JSON.stringify(r) + '\n').join(''));
 
+// Hourly means keyed by UTC hour start (`t`); `n` is the number of samples averaged.
+// Rows keep the raw-sample shape so the dashboard can mix them with raw samples.
 function hourlyMeans(samples) {
   const buckets = new Map();
   for (const s of samples) {
@@ -176,7 +183,7 @@ function hourlyMeans(samples) {
     buckets.get(h).push(s);
   }
   return [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([h, arr]) => {
-    const row = { time: new Date(h).toISOString(), samples: arr.length };
+    const row = { t: h, n: arr.reduce((a, s) => a + (s.n || 1), 0) };
     for (const k of MEAN_KEYS) {
       const v = arr.map(s => s[k]).filter(x => x != null && Number.isFinite(x));
       row[k] = v.length ? round(v.reduce((a, b) => a + b, 0) / v.length, 2) : null;
@@ -222,16 +229,38 @@ function writeApi() {
     location: 'Vestmarka skianlegg',
     interval: 'hourly mean (UTC hour start)',
     units: UNITS,
-    hours: hourlyMeans(samples),
+    hours: hourlyMeans(samples).map(({ t: h, n, ...r }) => ({ time: new Date(h).toISOString(), samples: n, ...r })),
     sources: SOURCES,
   });
+}
+
+// Keeps the repo bounded: raw samples older than RAW_DAYS (cut at a UTC midnight, so the
+// file is only rewritten once a day) are folded into hourly means in station_hourly.jsonl,
+// which in turn keeps only ARCHIVE_DAYS (yr_hourly, used for pairing, keeps just 60).
+function compactStation() {
+  const cutoff = Math.floor((Date.now() - RAW_DAYS * 24 * HOUR) / (24 * HOUR)) * 24 * HOUR;
+  const raw = readStationSamples(0);
+  const old = raw.filter(s => s.t < cutoff);
+  const archiveCutoff = Date.now() - ARCHIVE_DAYS * 24 * HOUR;
+  const archive = readJsonl(STATION_HOURLY_FILE, 0);
+  const trimmed = archive.filter(r => r.t >= archiveCutoff);
+  if (!old.length && trimmed.length === archive.length) return;
+  const merged = new Map(trimmed.map(r => [r.t, r]));
+  for (const r of hourlyMeans(old)) {
+    const prev = merged.get(r.t);
+    merged.set(r.t, prev ? hourlyMeans([prev, r])[0] : r);
+  }
+  const rows = [...merged.values()].filter(r => r.t >= archiveCutoff).sort((a, b) => a.t - b.t);
+  writeJsonl(STATION_HOURLY_FILE, rows);
+  writeJsonl(STATION_FILE, raw.filter(s => s.t >= cutoff));
+  console.log(`compact: ${old.length} raw samples -> hourly archive (${rows.length} hours)`);
 }
 
 async function tick() {
   const results = await Promise.allSettled([sampleStation(), refreshYr(false)]);
   let failed = false;
   for (const r of results) if (r.status === 'rejected') { failed = true; console.error(r.reason.message); }
-  try { writeApi(); } catch (e) { failed = true; console.error('api:', e.message); }
+  try { compactStation(); writeApi(); } catch (e) { failed = true; console.error('post-process:', e.message); }
   return !failed;
 }
 

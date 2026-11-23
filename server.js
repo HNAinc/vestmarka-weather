@@ -14,6 +14,7 @@ const FILES = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/index.html': ['index.html', 'text/html; charset=utf-8'],
   '/data/station.jsonl': ['data/station.jsonl', 'text/plain; charset=utf-8'],
+  '/data/station_hourly.jsonl': ['data/station_hourly.jsonl', 'text/plain; charset=utf-8'],
   '/data/yr_hourly.json': ['data/yr_hourly.json', 'application/json'],
   '/data/yr_latest.json': ['data/yr_latest.json', 'application/json'],
   '/api/v1/latest.json': ['api/v1/latest.json', 'application/json'],
