@@ -446,15 +446,15 @@ function drawStats(s) {
 // Rule-of-thumb model for fan guns. These are estimates, not measurements: tune SNOW to your
 // own guns and observations (the capacity curve varies a lot between guns and sites).
 const SNOW = {
-  limits: { marginal: -2, good: -4, excellent: -8 },   // wet bulb (°C) at or below which snowmaking is marginal / good / excellent
+  limits: { marginal: -3, good: -4, excellent: -6 },   // wet bulb (°C) at or below which snowmaking is marginal / good / great; warmer = no go
   noNucleatorPenalty: 1,                               // °C extra cold needed without a nucleator
-  capacity: [[-10, 1], [-8, 0.85], [-6, 0.6], [-4, 0.3], [-3, 0.15], [-2, 0.05]], // wet bulb → typical gun output relative to its maximum
+  capacity: [[-10, 1], [-8, 0.85], [-6, 0.65], [-4, 0.35], [-3, 0.05]], // wet bulb → typical gun output relative to its maximum
 };
 const CLASSES = {
   none:      { label: 'Too warm',  color: '#4a5568' },
   marginal:  { label: 'Marginal',  color: '#d29922' },
   good:      { label: 'Good',      color: '#58a6ff' },
-  excellent: { label: 'Excellent', color: '#3fb950' },
+  excellent: { label: 'Great',     color: '#3fb950' },
 };
 
 function interp(pts, x) {
@@ -550,7 +550,7 @@ function ensureSnowCharts() {
 function drawSnow(s) {
   ensureSnowCharts();
   const nuc = document.getElementById('nuc').value === '1';
-  const limit = x => fmt(x - (nuc ? 0 : SNOW.noNucleatorPenalty), 0);
+  const limit = x => String(x - (nuc ? 0 : SNOW.noNucleatorPenalty));
   const L = s.latest;
   const plan = hourlyPlan(s, 72, nuc);
   snowPlanCache = plan;
@@ -631,7 +631,7 @@ function drawSnow(s) {
       wins.slice(0, 4).map(w => `<tr><td>${range(w)}</td><td>${w.n}</td><td>${fmt(w.wb)} °C</td><td>${pct(w.cap)}</td><td><i class="sw" style="background:${CLASSES[w.cls].color}"></i>${CLASSES[w.cls].label}</td></tr>`).join('')}</table>` : '';
   const L2 = SNOW.limits;
   document.getElementById('snowNote').innerHTML =
-    `Rules of thumb for fan guns, not measurements. Classes use the wet bulb (corrected forecast): ≤ ${limit(L2.marginal)} °C marginal (wet, heavy snow), ≤ ${limit(L2.good)} °C good, ≤ ${limit(L2.excellent)} °C excellent (dry, light snow)` +
+    `Rules of thumb for fan guns, not measurements. Classes use the wet bulb (corrected forecast): ≤ ${limit(L2.marginal)} °C marginal (wet, heavy snow), ≤ ${limit(L2.good)} °C good, ≤ ${limit(L2.excellent)} °C great (dry, light snow)` +
     `${nuc ? '' : ' – these include the extra cold needed without a nucleator'}. ` +
     `Gun capacity is the typical output at that wet bulb relative to the gun's maximum. Adjust the SNOW constants in index.html to your own guns and observations.`;
 }
