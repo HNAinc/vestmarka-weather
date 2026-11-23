@@ -87,7 +87,7 @@
     <div class="banner" id="snowBanner">Loading…</div>
     <div class="cards" id="snowCards"></div>
     <div style="margin-bottom:10px">
-      <div class="panel"><h2>Next 72 h: snowmaking capacity by hour (bars) and forecast wet bulb at Vestmarka (line, right axis)</h2>
+      <div class="panel"><h2 id="snowPlanTitle">Snowmaking capacity by hour</h2>
         <div class="legend" id="snowLegend"></div>
         <div class="chartbox"><canvas id="c_snowplan"></canvas></div></div>
     </div>
@@ -535,11 +535,11 @@ function ensureSnowCharts() {
       plugins: {
         legend: { display: false },
         tooltip: { filter: item => item.dataset.label !== 'No-go limit', callbacks: {
-          title: items => dayHour(snowPlanCache[items[0].dataIndex].t),
+          title: items => { const p = snowPlanCache[items[0].dataIndex]; return dayHour(p.t) + (p.past ? ' (measured)' : ''); },
           label: item => item.dataset.yAxisID === 'y2' ? `Wet bulb ${fmt(item.parsed.y)} °C` : `Capacity ${Math.round(item.parsed.y)} %`,
           afterBody: items => {
             const p = snowPlanCache[items[0].dataIndex];
-            return [`${CLASSES[p.cls].label}`, `Wind ${fmt(p.wind)} m/s · RH ${fmt(p.hum, 0)} %`];
+            return p.missing ? ['No data'] : [`${CLASSES[p.cls].label}`, `Wind ${fmt(p.wind)} m/s · RH ${fmt(p.hum, 0)} %`];
           },
         } },
       },
@@ -553,7 +553,6 @@ function drawSnow(s) {
   const limit = x => String(x - (nuc ? 0 : SNOW.noNucleatorPenalty));
   const L = s.latest;
   const plan = hourlyPlan(s, 72, nuc);
-  snowPlanCache = plan;
   const wins = findWindows(plan);
   const best = wins[0];
   const next24 = plan.slice(0, 24);
@@ -615,16 +614,45 @@ function drawSnow(s) {
   ]));
   document.getElementById('snowCards').innerHTML = cards.join('');
 
-  // hourly capacity chart
-  snowChart.data.labels = plan.map(p => new Date(p.t).toLocaleDateString([], { weekday: 'short' }) + ' ' + String(new Date(p.t).getHours()).padStart(2, '0'));
+  // hourly capacity chart: range follows the History window and Forecast horizon dropdowns
+  const histH = Number(document.getElementById('hours').value);
+  const fcH = Number(document.getElementById('fchours').value);
+  const t0 = Math.floor(s.now / HOUR) * HOUR;
+  const measured = new Map();
+  for (const p of station) {
+    if (p.t < t0 - histH * HOUR || p.t >= t0 || p.wb == null) continue;
+    const h = Math.floor(p.t / HOUR) * HOUR;
+    if (!measured.has(h)) measured.set(h, []);
+    measured.get(h).push(p);
+  }
+  const mean = (a, k) => { const v = a.map(p => p[k]).filter(x => x != null); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; };
+  const chartPlan = [];
+  for (let h = histH; h >= 1; h--) {
+    const t = t0 - h * HOUR;
+    const a = measured.get(t);
+    if (!a) { chartPlan.push({ t, past: true, missing: true, cls: 'none', cap: null, wb: null }); continue; }
+    const wb = mean(a, 'wb');
+    chartPlan.push({ t, past: true, wb, wind: mean(a, 'wind'), hum: mean(a, 'hum'), ...snowAt(wb, nuc) });
+  }
+  chartPlan.push(...hourlyPlan(s, fcH, nuc));
+  snowPlanCache = chartPlan;
+  const total = histH + fcH;
+  const label = t => {
+    const d = new Date(t), hh = String(d.getHours()).padStart(2, '0');
+    if (total <= 96) return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + hh;
+    return d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + (total <= 240 ? ' ' + hh : '');
+  };
+  document.getElementById('snowPlanTitle').textContent =
+    `Snowmaking capacity by hour (bars) and wet bulb at Vestmarka (line, right axis): last ${histH} h measured (faded) + next ${fcH} h forecast`;
+  snowChart.data.labels = chartPlan.map(p => label(p.t));
   snowChart.data.datasets = [
-    { type: 'bar', label: 'Capacity', data: plan.map(p => Math.round(p.cap * 100)), backgroundColor: plan.map(p => CLASSES[p.cls].color), borderWidth: 0, categoryPercentage: 1, barPercentage: 0.95, yAxisID: 'y' },
-    { type: 'line', label: 'Wet bulb', data: plan.map(p => p.wb), borderColor: '#b784f5', backgroundColor: '#b784f5', borderWidth: 2, pointRadius: 0, tension: 0.2, yAxisID: 'y2' },
-    { type: 'line', label: 'No-go limit', data: plan.map(() => Number(limit(SNOW.limits.marginal))), borderColor: '#f85149', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, yAxisID: 'y2' },
+    { type: 'bar', label: 'Capacity', data: chartPlan.map(p => p.cap == null ? null : Math.round(p.cap * 100)), backgroundColor: chartPlan.map(p => CLASSES[p.cls].color + (p.past ? '70' : '')), borderWidth: 0, categoryPercentage: 1, barPercentage: 0.95, yAxisID: 'y' },
+    { type: 'line', label: 'Wet bulb', data: chartPlan.map(p => p.wb), borderColor: '#b784f5', backgroundColor: '#b784f5', borderWidth: 2, pointRadius: 0, tension: 0.2, yAxisID: 'y2' },
+    { type: 'line', label: 'No-go limit', data: chartPlan.map(() => Number(limit(SNOW.limits.marginal))), borderColor: '#f85149', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, yAxisID: 'y2' },
   ];
   snowChart.update('none');
   document.getElementById('snowLegend').innerHTML = Object.values(CLASSES).map(c => `<span><i class="sw" style="background:${c.color}"></i>${c.label}</span>`).join('')
-    + `<span><i style="background:#b784f5"></i>Forecast wet bulb (corrected to Vestmarka)</span>`
+    + `<span><i style="background:#b784f5"></i>Wet bulb (measured, then forecast corrected to Vestmarka)</span>`
     + `<span><i style="background:repeating-linear-gradient(90deg,#f85149 0 6px,transparent 6px 10px)"></i>No-go above ${limit(SNOW.limits.marginal)} °C</span>`;
 
   // best windows table
