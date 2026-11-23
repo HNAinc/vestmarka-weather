@@ -1,6 +1,6 @@
 {
  "location": "Vestmarka skianlegg",
- "observed_at": "2026-11-23T15:00:22.000Z",
+ "observed_at": "2026-11-23T15:15:18.000Z",
  "units": {
   "temp": "°C",
   "wb": "°C",
@@ -16,29 +16,29 @@
   "rainRate": "mm/h"
  },
  "observation": {
-  "temp": -2.28,
-  "hum": 61,
-  "dew": -8.78,
-  "feels": -2.28,
-  "wb": -4.27,
-  "wbStull": -4.96,
-  "wind": 0.49,
-  "gust": 0.98,
-  "dir": 343,
+  "temp": -2.39,
+  "hum": 62,
+  "dew": -8.67,
+  "feels": -2.39,
+  "wb": -4.32,
+  "wbStull": -5.01,
+  "wind": 0.18,
+  "gust": 0.49,
+  "dir": 306,
   "press": 1016.6,
   "pressAbs": 994.6,
   "rain": 0,
   "rainRate": 0
  },
  "forecast_now": {
-  "issued_at": "2026-11-23T15:57:46+01:00",
-  "temp": -1.7,
-  "feels": -6,
+  "issued_at": "2026-11-23T16:12:51+01:00",
+  "temp": -1.8,
+  "feels": -7,
   "wind": 4,
-  "gust": 9.7,
-  "dir": 326,
+  "gust": 9.6,
+  "dir": 325,
   "precip": 0,
-  "symbol": "partlycloudy_day"
+  "symbol": "fair_night"
  },
  "sources": {
   "station": "Ecowitt station at Vestmarka skianlegg via webkamera.jardar.no (Jardar IL)",
