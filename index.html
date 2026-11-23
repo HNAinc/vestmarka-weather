@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vestmarka skianlegg vs yr.no – Vestmarksetra</title>
+<style>
+  :root { --bg:#0f1720; --card:#17212d; --border:#263445; --text:#e6edf3; --muted:#8b9bab;
+          --station:#3fb950; --yr:#58a6ff; --corr:#f0883e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, Segoe UI, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 24px; display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); }
+  h1 { font-size:20px; margin:0; }
+  .sub { color:var(--muted); font-size:13px; margin-top:4px; }
+  main { padding:20px 24px; max-width:1500px; margin:auto; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:20px; }
+  .card, .panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+  .card .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .card .big { font-size:28px; font-weight:650; margin:4px 0; color:var(--station); }
+  .card .row { font-size:13px; color:var(--muted); display:flex; justify-content:space-between; }
+  .card .row b { color:var(--yr); font-weight:600; }
+  .charts { display:grid; grid-template-columns:repeat(auto-fit,minmax(520px,1fr)); gap:16px; margin-bottom:20px; }
+  .panel h2 { font-size:15px; margin:0 0 8px; }
+  .chartbox { position:relative; height:300px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--border); }
+  th:first-child, td:first-child { text-align:left; }
+  th { color:var(--muted); font-weight:600; }
+  select, button, a.btn { background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:13px; text-decoration:none; cursor:pointer; }
+  .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .note { color:var(--muted); font-size:12px; line-height:1.5; margin-top:10px; }
+  .pos { color:#f0883e; } .neg { color:#58a6ff; }
+  .warn { background:#3a2a10; border:1px solid #6b4a14; color:#f0c674; padding:10px 14px; border-radius:10px; margin-bottom:16px; font-size:13px; display:none; }
+  .days { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; }
+  .day { background:#101923; border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:13px; }
+  .day .d { color:var(--muted); font-size:12px; }
+  .day .t { font-weight:650; }
+  .day .c { color:var(--corr); font-size:12px; }
+  .legend span { display:inline-block; margin-right:14px; font-size:12px; color:var(--muted); }
+  .legend i { display:inline-block; width:18px; height:3px; margin-right:6px; vertical-align:middle; }
+  footer { color:var(--muted); font-size:12px; text-align:center; padding:16px 24px 24px; }
+  footer a { color:var(--yr); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Vestmarka skianlegg vs yr.no – Vestmarksetra</h1>
+    <div class="sub" id="sub">Loading…</div>
+  </div>
+  <div class="controls">
+    <label class="sub">History window
+      <select id="hours">
+        <option value="1">1 h</option><option value="3">3 h</option><option value="6" selected>6 h</option><option value="24">24 h</option>
+        <option value="48">48 h</option><option value="168">7 days</option><option value="720">30 days</option>
+      </select>
+    </label>
+    <label class="sub">Forecast horizon
+      <select id="fchours">
+        <option value="1">1 h</option><option value="3">3 h</option><option value="6">6 h</option><option value="12">12 h</option>
+        <option value="24" selected>24 h</option><option value="48">48 h</option><option value="72">72 h</option><option value="240">10 days</option>
+      </select>
+    </label>
+    <button id="csv">Download station CSV</button>
+  </div>
+</header>
+<main>
+  <div class="warn" id="warn"></div>
+  <div class="cards" id="cards"></div>
+  <div class="legend">
+    <span><i style="background:var(--station)"></i>Vestmarka skianlegg (measured sensors; wet bulb derived from its temp + humidity + pressure)</span>
+    <span><i style="background:#b784f5"></i>Wet bulb, Stull formula (the value jardar.no's page shows — also derived)</span>
+    <span><i style="background:var(--yr)"></i>yr.no forecast (raw)</span>
+    <span><i style="background:var(--corr)"></i>yr.no corrected to Vestmarka (prediction)</span>
+  </div>
+  <div class="charts" id="charts"></div>
+  <div class="panel" style="margin-bottom:20px">
+    <h2>Daily outlook (yr.no raw → predicted at Vestmarka)</h2>
+    <div class="days" id="days"></div>
+  </div>
+  <div class="panel">
+    <h2>How the two sources compare (hourly means, station − yr.no)</h2>
+    <table id="stats"></table>
+    <div class="note" id="note"></div>
+  </div>
+</main>
+<footer>
+  Station data: Ecowitt weather station at Vestmarka skianlegg, via <a href="https://webkamera.jardar.no/">webkamera.jardar.no</a> (Jardar IL) ·
+  Forecast data: <a href="https://www.yr.no/nb/detaljer/tabell/1-73018/">MET Norway / yr.no</a> (CC BY 4.0)
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script>
+'use strict';
+// ---------- shared math (mirrors collect.js) ----------
+const HOUR = 3600e3;
+const round = (v, d = 1) => (v == null || !Number.isFinite(v) ? null : Math.round(v * 10 ** d) / 10 ** d);
+const ELEVATION_M = 234;
+const DEFAULT_P = 1013.25 * Math.pow(1 - 0.0065 * ELEVATION_M / 288.15, 5.255);
+const buckEs = T => 6.1121 * Math.exp((18.678 - T / 234.5) * T / (257.14 + T));
+function wetBulb(T, RH, pHpa) {
+  if (T == null || RH == null || !Number.isFinite(T) || !Number.isFinite(RH)) return null;
+  RH = Math.min(100, Math.max(1, RH));
+  const p = Number.isFinite(pHpa) && pHpa > 500 ? pHpa : DEFAULT_P;
+  const e = (RH / 100) * buckEs(T);
+  const g = Tw => buckEs(Tw) - 6.60e-4 * (1 + 0.00115 * Tw) * p * (T - Tw) - e;
+  let lo = T - 60, hi = T;
+  for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (g(mid) > 0) hi = mid; else lo = mid; }
+  return (lo + hi) / 2;
+}
+function wetBulbStull(T, RH) {
+  if (T == null || RH == null) return null;
+  RH = Math.min(100, Math.max(1, RH));
+  return T * Math.atan(0.151977 * Math.sqrt(RH + 8.313659)) + Math.atan(T + RH) - Math.atan(RH - 1.676331)
+    + 0.00391838 * Math.pow(RH, 1.5) * Math.atan(0.023101 * RH) - 4.686035;
+}
+function stationPressure(slpHpa, T) {
+  if (slpHpa == null || !Number.isFinite(slpHpa)) return null;
+  const TK = (Number.isFinite(T) ? T : 0) + 273.15;
+  return slpHpa * Math.pow(1 - 0.0065 * ELEVATION_M / (TK + 0.0065 * ELEVATION_M), 5.257);
+}
+
+// ---------- analysis (ported from the previous server-side implementation) ----------
+const VARS = [
+  { key: 'temp', label: 'Temperature', unit: '°C', mode: 'add' },
+  { key: 'wb', label: 'Wet bulb', unit: '°C', mode: 'add' },
+  { key: 'hum', label: 'Humidity', unit: '%', mode: 'add', clamp: [0, 100] },
+  { key: 'wind', label: 'Wind', unit: 'm/s', mode: 'ratio' },
+  { key: 'gust', label: 'Gust', unit: 'm/s', mode: 'ratio' },
+  { key: 'press', label: 'Pressure', unit: 'hPa', mode: 'add' },
+];
+
+let station = [], yrHourly = {}, yrLatest = null;
+
+function yrAt(t, key, keys) {
+  let lo = -1;
+  for (let i = 0; i < keys.length; i++) { if (keys[i] <= t) lo = i; else break; }
+  const a = lo >= 0 ? keys[lo] : null;
+  const b = lo + 1 < keys.length ? keys[lo + 1] : null;
+  const va = a != null ? yrHourly[a][key] : null;
+  const vb = b != null ? yrHourly[b][key] : null;
+  if (va != null && vb != null && b - a <= 3 * HOUR) return va + (vb - va) * (t - a) / (b - a);
+  if (va != null && t - a <= HOUR) return va;
+  if (vb != null && b - t <= HOUR) return vb;
+  return null;
+}
+
+function buildPairs(keys) {
+  const buckets = new Map();
+  for (const s of station) {
+    const h = Math.floor(s.t / HOUR) * HOUR;
+    let b = buckets.get(h);
+    if (!b) buckets.set(h, b = { n: 0, sums: {} });
+    b.n++;
+    for (const v of VARS) if (s[v.key] != null) b.sums[v.key] = (b.sums[v.key] || 0) + s[v.key];
+  }
+  const pairs = [];
+  for (const [h, b] of [...buckets].sort((a, b) => a[0] - b[0])) {
+    const mid = h + HOUR / 2;
+    const row = { t: mid };
+    for (const v of VARS) {
+      const st = b.sums[v.key] != null ? b.sums[v.key] / b.n : null;
+      const yr = yrAt(mid, v.key, keys);
+      row[v.key] = st != null && yr != null ? { st, yr } : null;
+    }
+    pairs.push(row);
+  }
+  return pairs;
+}
+
+function computeStats(pairs) {
+  const out = {};
+  const now = Date.now();
+  const halfLife = 24 * HOUR;
+  for (const v of VARS) {
+    const rows = pairs.filter(p => p[v.key]).map(p => ({ t: p.t, ...p[v.key] }));
+    const n = rows.length;
+    if (!n) { out[v.key] = { n: 0 }; continue; }
+    const diffs = rows.map(r => r.st - r.yr);
+    const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+    const bias = mean(diffs);
+    const mae = mean(diffs.map(Math.abs));
+    const rmse = Math.sqrt(mean(diffs.map(d => d * d)));
+    const sd = n > 1 ? Math.sqrt(mean(diffs.map(d => (d - bias) ** 2)) * n / (n - 1)) : 0;
+    const ratios = rows.filter(r => r.yr > 0.3).map(r => r.st / r.yr);
+    let w = 0, wb = 0, wr = 0, wrw = 0;
+    rows.forEach((r, i) => { const wt = Math.pow(0.5, (now - r.t) / halfLife); w += wt; wb += wt * diffs[i]; });
+    rows.forEach(r => { if (r.yr > 0.3) { const wt = Math.pow(0.5, (now - r.t) / halfLife); wrw += wt; wr += wt * (r.st / r.yr); } });
+    const mx = mean(rows.map(r => r.yr)), my = mean(rows.map(r => r.st));
+    let sxx = 0, sxy = 0, syy = 0;
+    for (const r of rows) { sxx += (r.yr - mx) ** 2; sxy += (r.yr - mx) * (r.st - my); syy += (r.st - my) ** 2; }
+    const corr = sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
+    out[v.key] = {
+      n, bias, mae, rmse, sd, corr,
+      slope: sxx > 0 ? sxy / sxx : null,
+      recentBias: w ? wb / w : bias,
+      ratio: ratios.length ? mean(ratios) : 1,
+      recentRatio: wrw ? wr / wrw : 1,
+      hours: rows,
+    };
+  }
+  return out;
+}
+
+function diurnalBias(st, key, hourOfDay) {
+  const rows = st[key].hours || [];
+  const days = new Set(rows.map(r => new Date(r.t).toDateString())).size;
+  if (days < 3) return 0;
+  const near = rows.filter(r => { const d = Math.abs(new Date(r.t).getHours() - hourOfDay); return Math.min(d, 24 - d) <= 1; });
+  if (near.length < 3) return 0;
+  const m = near.reduce((a, r) => a + (r.st - r.yr), 0) / near.length;
+  return (m - st[key].bias) * (near.length / (near.length + 3));
+}
+
+function correct(yrPoint, st, v) {
+  const s = st[v.key];
+  const x = yrPoint[v.key];
+  if (x == null || !s || !s.n) return null;
+  const shrink = s.n / (s.n + 12);
+  let y;
+  if (v.mode === 'ratio') {
+    const r = Math.min(3, Math.max(0.3, 0.5 * s.ratio + 0.5 * s.recentRatio));
+    y = x * (1 + (r - 1) * shrink);
+  } else {
+    const b = 0.5 * s.bias + 0.5 * s.recentBias;
+    y = x + b * shrink + diurnalBias(st, v.key, new Date(yrPoint.t).getHours()) * shrink;
+  }
+  if (v.clamp) y = Math.min(v.clamp[1], Math.max(v.clamp[0], y));
+  return y;
+}
+
+function buildState(hoursBack) {
+  const keys = Object.keys(yrHourly).map(Number).sort((a, b) => a - b);
+  const pairs = buildPairs(keys);
+  const st = computeStats(pairs);
+  const now = Date.now();
+  const since = now - hoursBack * HOUR;
+
+  const stationSeries = station.filter(s => s.t >= since);
+  const yrSeries = keys.filter(k => k >= since - HOUR).map(k => ({ t: k, ...yrHourly[k] }));
+  const forecast = keys.filter(k => k >= Math.floor(now / HOUR) * HOUR).map(k => {
+    const raw = { t: k, ...yrHourly[k] };
+    const c = { t: k, coarse: !!raw.coarse, symbol: raw.symbol, precip: raw.precip, raw: {}, corrected: {}, band: {} };
+    for (const v of VARS) {
+      c.raw[v.key] = raw[v.key] == null ? null : round(raw[v.key], 2);
+      const cv = correct(raw, st, v);
+      c.corrected[v.key] = round(cv, 2);
+      if (cv != null && st[v.key].n > 3 && (v.key === 'temp' || v.key === 'wb')) {
+        const band = Math.max(0.3, st[v.key].sd);
+        c.band[v.key] = [round(cv - band, 2), round(cv + band, 2)];
+      }
+    }
+    const ct = c.corrected.temp, chh = c.corrected.hum;
+    if (ct != null && chh != null) c.corrected.wbFromTH = round(wetBulb(ct, chh, stationPressure(c.corrected.press, ct)), 2);
+    return c;
+  });
+
+  const latest = station[station.length - 1] || null;
+  const yrNow = latest ? Object.fromEntries(VARS.map(v => [v.key, round(yrAt(latest.t, v.key, keys), 2)])) : null;
+  const summary = {};
+  for (const v of VARS) {
+    const s = st[v.key];
+    summary[v.key] = s.n ? {
+      n: s.n, bias: round(s.bias, 2), recentBias: round(s.recentBias, 2), mae: round(s.mae, 2), rmse: round(s.rmse, 2),
+      sd: round(s.sd, 2), corr: round(s.corr, 2), slope: round(s.slope, 2),
+      confidence: round(s.n / (s.n + 12), 2),
+    } : { n: 0 };
+  }
+  return {
+    now, latest, yrNow, summary, forecast,
+    station: stationSeries, yr: yrSeries,
+    sampleCount: station.length, firstSample: station.length ? station[0].t : null,
+    yrCreated: yrLatest ? yrLatest.created : null,
+  };
+}
+
+// ---------- UI ----------
+const COLORS = { station:'#3fb950', yr:'#58a6ff', corr:'#f0883e' };
+const CHARTS = [
+  { key:'temp', title:'Temperature (°C)' },
+  { key:'wb', title:'Wet bulb (°C) — calculated, not a sensor reading' },
+  { key:'hum', title:'Relative humidity (%)' },
+  { key:'wind', title:'Wind (m/s)' },
+  { key:'gust', title:'Gust (m/s)' },
+  { key:'press', title:'Pressure (hPa)' },
+];
+const charts = {};
+const fmt = (v, d = 1) => v == null ? '–' : Number(v).toFixed(d);
+const sign = v => v == null ? '–' : (v > 0 ? '+' : '') + Number(v).toFixed(2);
+const hhmm = t => new Date(t).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+
+function ensureCharts() {
+  const host = document.getElementById('charts');
+  if (host.children.length) return;
+  for (const c of CHARTS) {
+    host.insertAdjacentHTML('beforeend', `<div class="panel"><h2>${c.title}</h2><div class="chartbox"><canvas id="c_${c.key}"></canvas></div></div>`);
+    charts[c.key] = new Chart(document.getElementById('c_' + c.key), {
+      type:'line',
+      data:{ datasets:[] },
+      options:{
+        animation:false, responsive:true, maintainAspectRatio:false, parsing:false, normalized:true,
+        interaction:{ mode:'nearest', axis:'x', intersect:false },
+        elements:{ point:{ radius:0 }, line:{ borderWidth:2, tension:0.15 } },
+        scales:{
+          x:{ type:'linear', ticks:{ color:'#8b9bab', maxTicksLimit:8, callback:v => { const d = new Date(v); return d.toLocaleDateString([], {weekday:'short'}) + ' ' + hhmm(v); } }, grid:{ color:'#223' } },
+          y:{ ticks:{ color:'#8b9bab' }, grid:{ color:'#223' } },
+        },
+        plugins:{
+          legend:{ display:false },
+          tooltip:{ callbacks:{ title: items => new Date(items[0].parsed.x).toLocaleString() } },
+        },
+      },
+    });
+  }
+}
+
+function drawCharts(s) {
+  const now = s.now;
+  for (const c of CHARTS) {
+    const k = c.key;
+    const ch = charts[k];
+    const st = s.station.filter(p => p[k] != null).map(p => ({ x:p.t, y:p[k] }));
+    const yr = [
+      ...s.yr.filter(p => p[k] != null && p.t < now).map(p => ({ x:p.t, y:p[k] })),
+      ...s.forecast.filter(p => p.raw[k] != null).map(p => ({ x:p.t, y:p.raw[k] })),
+    ];
+    const corr = s.forecast.filter(p => p.corrected[k] != null).map(p => ({ x:p.t, y:p.corrected[k] }));
+    const hi = s.forecast.filter(p => p.band[k]).map(p => ({ x:p.t, y:p.band[k][1] }));
+    const lo = s.forecast.filter(p => p.band[k]).map(p => ({ x:p.t, y:p.band[k][0] }));
+    const ds = [
+      { label:'Vestmarka', data:st, borderColor:COLORS.station, backgroundColor:COLORS.station, pointRadius: st.length < 40 ? 3 : 0 },
+      { label:'yr.no', data:yr, borderColor:COLORS.yr, backgroundColor:COLORS.yr },
+      { label:'Corrected', data:corr, borderColor:COLORS.corr, backgroundColor:COLORS.corr, borderDash:[6,3] },
+    ];
+    if (k === 'wb') {
+      ds[0].label = 'From Vestmarka sensors (psychrometric)';
+      ds[1].label = 'From yr.no forecast (psychrometric)';
+      const stull = s.station.filter(p => p.wbStull != null).map(p => ({ x:p.t, y:p.wbStull }));
+      ds.push({ label:'From Vestmarka sensors (Stull, as on jardar.no)', data:stull, borderColor:'#b784f5', backgroundColor:'#b784f5', borderDash:[2,3], pointRadius: stull.length < 40 ? 2 : 0 });
+    }
+    if (hi.length) {
+      ds.push({ label:'band hi', data:hi, borderWidth:0, pointRadius:0, borderColor:'transparent', backgroundColor:'rgba(240,136,62,.15)', fill:'+1' });
+      ds.push({ label:'band lo', data:lo, borderWidth:0, pointRadius:0, borderColor:'transparent' });
+    }
+    ch.data.datasets = ds;
+    const earliest = Math.min(...[st[0], yr[0]].filter(Boolean).map(p => p.x), now);
+    ch.options.scales.x.min = Math.max(now - Number(document.getElementById('hours').value) * 3600e3, earliest - 600e3);
+    ch.options.scales.x.max = now + Number(document.getElementById('fchours').value) * 3600e3;
+    ch.update('none');
+  }
+}
+
+function drawCards(s) {
+  const L = s.latest, Y = s.yrNow;
+  const defs = [
+    ['temp','Temperature','°C',1], ['wb','Wet bulb (calculated)','°C',1], ['hum','Humidity','%',0],
+    ['wind','Wind','m/s',1], ['gust','Gust','m/s',1], ['press','Pressure','hPa',0],
+  ];
+  const html = defs.map(([k, name, unit, d]) => {
+    if (!L) return '';
+    const diff = Y && Y[k] != null ? L[k] - Y[k] : null;
+    return `<div class="card"><div class="label">${name}</div>
+      <div class="big">${fmt(L[k], d)} ${unit}</div>
+      <div class="row"><span>yr.no now</span><b>${fmt(Y && Y[k], d)} ${unit}</b></div>
+      <div class="row"><span>Vestmarka − yr</span><b class="${diff > 0 ? 'pos' : 'neg'}">${diff == null ? '–' : sign(diff)}</b></div></div>`;
+  }).join('');
+  document.getElementById('cards').innerHTML = html || '<div class="card">Waiting for first sample…</div>';
+}
+
+function drawDays(s) {
+  const byDay = new Map();
+  for (const p of s.forecast) {
+    const d = new Date(p.t); const key = d.toDateString();
+    if (!byDay.has(key)) byDay.set(key, { d, raw:[], cor:[] });
+    const e = byDay.get(key);
+    if (p.raw.temp != null) e.raw.push(p.raw.temp);
+    if (p.corrected.temp != null) e.cor.push(p.corrected.temp);
+  }
+  const mm = a => a.length ? `${fmt(Math.min(...a))} / ${fmt(Math.max(...a))}` : '–';
+  document.getElementById('days').innerHTML = [...byDay.values()].slice(0, 10).map(e =>
+    `<div class="day"><div class="d">${e.d.toLocaleDateString([], { weekday:'short', day:'numeric', month:'short' })}</div>
+     <div class="t">${mm(e.raw)} °C</div><div class="c">Vestmarka: ${mm(e.cor)} °C</div></div>`).join('');
+}
+
+function drawStats(s) {
+  const rows = VARS.map(v => {
+    const m = s.summary[v.key];
+    if (!m.n) return `<tr><td>${v.label}</td><td colspan="8">no overlapping data yet</td></tr>`;
+    return `<tr><td>${v.label} (${v.unit})</td><td>${m.n}</td><td>${sign(m.bias)}</td><td>${sign(m.recentBias)}</td>
+      <td>${fmt(m.mae, 2)}</td><td>${fmt(m.rmse, 2)}</td><td>${m.corr == null ? '–' : fmt(m.corr, 2)}</td>
+      <td>${m.slope == null ? '–' : fmt(m.slope, 2)}</td><td>${Math.round(m.confidence * 100)}%</td></tr>`;
+  }).join('');
+  document.getElementById('stats').innerHTML =
+    `<tr><th>Variable</th><th>Hours</th><th>Mean bias</th><th>Recent bias (24 h half-life)</th><th>MAE</th><th>RMSE</th><th>Correlation</th><th>Slope</th><th>Model confidence</th></tr>${rows}`;
+  const first = s.firstSample ? new Date(s.firstSample).toLocaleString() : '–';
+  document.getElementById('note').innerHTML =
+    `Bias = station − yr.no. The prediction (orange) adds a learned offset to yr.no's forecast (multiplicative for wind): a blend of the long-run and recent (24 h half-life) bias, scaled by confidence = n/(n+12) hours, plus a time-of-day correction after 3+ days of data. The shaded band is ±1 σ of the hourly residual. Wet bulb is computed psychrometrically (Arden Buck vapor pressure, iterative solve, water basis) using the station's measured absolute pressure — more accurate than the Stull formula shown on jardar.no, especially below 0 °C; yr.no's sea-level pressure is converted to station level first. The station exposes no history, so data has been collected periodically since ${first} (${s.sampleCount} samples) – accuracy improves as data accumulates, and gaps occur while the collector is not running.`;
+}
+
+function downloadCsv() {
+  const cols = ['t', 'temp', 'hum', 'dew', 'feels', 'wb', 'wbStull', 'wind', 'gust', 'dir', 'press', 'pressAbs', 'rain', 'rainRate'];
+  const lines = [cols.join(',')].concat(station.map(s => cols.map(c => c === 't' ? new Date(s.t).toISOString() : (s[c] ?? '')).join(',')));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' }));
+  a.download = 'vestmarka_station.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function loadData() {
+  const get = async (url, text) => {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error(url + ' -> HTTP ' + r.status);
+    return text ? r.text() : r.json();
+  };
+  const [jsonl, hourly, latest] = await Promise.all([
+    get('data/station.jsonl', true).catch(() => ''),
+    get('data/yr_hourly.json').catch(() => ({})),
+    get('data/yr_latest.json').catch(() => null),
+  ]);
+  station = jsonl.split('\n').filter(Boolean).map(l => JSON.parse(l));
+  // recompute derived values so all stored data uses the current formulas
+  for (const s of station) { s.wb = round(wetBulb(s.temp, s.hum, s.pressAbs), 2); s.wbStull = round(wetBulbStull(s.temp, s.hum), 2); }
+  yrHourly = hourly;
+  for (const v of Object.values(yrHourly)) v.wb = round(wetBulb(v.temp, v.hum, stationPressure(v.press, v.temp)), 2);
+  yrLatest = latest;
+}
+
+async function refresh() {
+  try {
+    await loadData();
+    const s = buildState(Number(document.getElementById('hours').value));
+    ensureCharts(); drawCards(s); drawCharts(s); drawDays(s); drawStats(s);
+    const warn = document.getElementById('warn');
+    const age = s.latest ? Date.now() - s.latest.t : null;
+    if (age == null) { warn.style.display = 'block'; warn.textContent = 'No station data collected yet.'; }
+    else if (age > 45 * 60e3) { warn.style.display = 'block'; warn.textContent = `Latest station sample is ${Math.round(age / 60e3)} min old — the collector may be delayed or not running.`; }
+    else warn.style.display = 'none';
+    document.getElementById('sub').textContent =
+      `Station sample ${s.latest ? new Date(s.latest.t).toLocaleString() : '–'} · yr.no forecast issued ${s.yrCreated ? new Date(s.yrCreated).toLocaleString() : '–'} · page refreshes every 60 s`;
+  } catch (e) { document.getElementById('sub').textContent = 'Error: ' + e.message; }
+}
+document.getElementById('hours').addEventListener('change', refresh);
+document.getElementById('fchours').addEventListener('change', refresh);
+document.getElementById('csv').addEventListener('click', downloadCsv);
+refresh(); setInterval(refresh, 60000);
+</script>
+</body>
+</html>

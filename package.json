@@ -1,0 +1,12 @@
+{
+  "name": "vestmarka-weather",
+  "version": "1.0.0",
+  "description": "Vestmarka skianlegg weather station vs yr.no forecast dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --use-system-ca server.js",
+    "collect": "node --use-system-ca collect.js"
+  },
+  "license": "MIT",
+  "type": "commonjs"
+}
