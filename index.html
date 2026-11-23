@@ -129,7 +129,7 @@ const VARS = [
   { key: 'press', label: 'Pressure', unit: 'hPa', mode: 'add' },
 ];
 
-let station = [], yrHourly = {}, yrLatest = null;
+let station = [], yrHourly = {}, yrLatest = null, archiveCache = { at: 0, rows: [] };
 
 function yrAt(t, key, keys) {
   let lo = -1;
@@ -412,15 +412,18 @@ async function loadData() {
     if (!r.ok) throw new Error(url + ' -> HTTP ' + r.status);
     return text ? r.text() : r.json();
   };
+  // The hourly archive only changes once a day, so don't re-download it every refresh.
+  const archiveStale = Date.now() - archiveCache.at > 3600e3;
   const [jsonl, archive, hourly, latest] = await Promise.all([
     get('data/station.jsonl', true).catch(() => ''),
-    get('data/station_hourly.jsonl', true).catch(() => ''),
+    archiveStale ? get('data/station_hourly.jsonl', true).catch(() => null) : null,
     get('data/yr_hourly.json').catch(() => ({})),
     get('data/yr_latest.json').catch(() => null),
   ]);
   const parse = txt => txt.split('\n').filter(Boolean).map(l => JSON.parse(l));
+  if (archive != null) archiveCache = { at: Date.now(), rows: parse(archive) };
   // older history is stored as hourly means (one row per hour, with `n` samples)
-  station = parse(archive).concat(parse(jsonl)).sort((a, b) => a.t - b.t);
+  station = archiveCache.rows.concat(parse(jsonl)).sort((a, b) => a.t - b.t);
   // recompute derived values so all stored data uses the current formulas
   for (const s of station) { s.wb = round(wetBulb(s.temp, s.hum, s.pressAbs), 2); s.wbStull = round(wetBulbStull(s.temp, s.hum), 2); }
   yrHourly = hourly;
