@@ -534,7 +534,7 @@ function ensureSnowCharts() {
       },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: {
+        tooltip: { filter: item => item.dataset.label !== 'No-go limit', callbacks: {
           title: items => dayHour(snowPlanCache[items[0].dataIndex].t),
           label: item => item.dataset.yAxisID === 'y2' ? `Wet bulb ${fmt(item.parsed.y)} °C` : `Capacity ${Math.round(item.parsed.y)} %`,
           afterBody: items => {
@@ -620,10 +620,12 @@ function drawSnow(s) {
   snowChart.data.datasets = [
     { type: 'bar', label: 'Capacity', data: plan.map(p => Math.round(p.cap * 100)), backgroundColor: plan.map(p => CLASSES[p.cls].color), borderWidth: 0, categoryPercentage: 1, barPercentage: 0.95, yAxisID: 'y' },
     { type: 'line', label: 'Wet bulb', data: plan.map(p => p.wb), borderColor: '#b784f5', backgroundColor: '#b784f5', borderWidth: 2, pointRadius: 0, tension: 0.2, yAxisID: 'y2' },
+    { type: 'line', label: 'No-go limit', data: plan.map(() => Number(limit(SNOW.limits.marginal))), borderColor: '#f85149', borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0, yAxisID: 'y2' },
   ];
   snowChart.update('none');
   document.getElementById('snowLegend').innerHTML = Object.values(CLASSES).map(c => `<span><i class="sw" style="background:${c.color}"></i>${c.label}</span>`).join('')
-    + `<span><i style="background:#b784f5"></i>Forecast wet bulb (corrected to Vestmarka)</span>`;
+    + `<span><i style="background:#b784f5"></i>Forecast wet bulb (corrected to Vestmarka)</span>`
+    + `<span><i style="background:repeating-linear-gradient(90deg,#f85149 0 6px,transparent 6px 10px)"></i>No-go above ${limit(SNOW.limits.marginal)} °C</span>`;
 
   // best windows table
   document.getElementById('snowWindows').innerHTML = wins.length
