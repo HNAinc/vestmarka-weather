@@ -9,7 +9,7 @@ with a bias-corrected local forecast and psychrometric wet-bulb temperatures
 The station exposes no history, so a collector samples it periodically and the
 history accumulates in [`data/`](data/):
 
-- `data/station.jsonl` – raw station samples for the last 8 days
+- `data/station.jsonl` – raw station samples for the last 30 days
 - `data/station_hourly.jsonl` – hourly means of older samples (kept 30 days); compaction runs
   once a day inside the collector, so the repo size stays bounded
 - `data/yr_hourly.json` – latest yr.no forecast per hour (kept 60 days)

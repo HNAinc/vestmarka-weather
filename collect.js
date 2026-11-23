@@ -10,7 +10,7 @@ const STATION_URL = 'https://webkamera.jardar.no/weather.php';
 const YR_BASE = 'https://www.yr.no/api/v0/locations/1-73018';
 const YR_REFRESH_MS = 14 * 60 * 1000;
 const KEEP_DAYS = 60;
-const RAW_DAYS = 8;
+const RAW_DAYS = 30;
 const ARCHIVE_DAYS = 30;
 const HOUR = 3600e3;
 
