@@ -96,7 +96,6 @@
   </div>
   <div class="legend">
     <span><i style="background:var(--station)"></i>Vestmarka skianlegg (measured sensors; wet bulb derived from its temp + humidity + pressure)</span>
-    <span><i style="background:#b784f5"></i>Wet bulb, Stull formula (the value jardar.no's page shows — also derived)</span>
     <span><i style="background:var(--yr)"></i>yr.no forecast (raw)</span>
     <span><i style="background:var(--corr)"></i>yr.no corrected to Vestmarka (prediction)</span>
   </div>
@@ -380,8 +379,6 @@ function drawCharts(s) {
     if (k === 'wb') {
       ds[0].label = 'From Vestmarka sensors (psychrometric)';
       ds[1].label = 'From yr.no forecast (psychrometric)';
-      const stull = s.station.filter(p => p.wbStull != null).map(p => ({ x:p.t, y:p.wbStull }));
-      ds.push({ label:'From Vestmarka sensors (Stull, as on jardar.no)', data:stull, borderColor:'#b784f5', backgroundColor:'#b784f5', borderDash:[2,3], pointRadius: stull.length < 40 ? 2 : 0 });
     }
     if (hi.length) {
       ds.push({ label:'band hi', data:hi, borderWidth:0, pointRadius:0, borderColor:'transparent', backgroundColor:'rgba(240,136,62,.15)', fill:'+1' });
