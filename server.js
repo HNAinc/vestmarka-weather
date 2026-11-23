@@ -16,6 +16,8 @@ const FILES = {
   '/data/station.jsonl': ['data/station.jsonl', 'text/plain; charset=utf-8'],
   '/data/yr_hourly.json': ['data/yr_hourly.json', 'application/json'],
   '/data/yr_latest.json': ['data/yr_latest.json', 'application/json'],
+  '/api/v1/latest.json': ['api/v1/latest.json', 'application/json'],
+  '/api/v1/observations.json': ['api/v1/observations.json', 'application/json'],
 };
 
 const server = http.createServer((req, res) => {
@@ -23,7 +25,7 @@ const server = http.createServer((req, res) => {
   if (!entry) { res.writeHead(404); return res.end('Not found'); }
   fs.readFile(path.join(__dirname, entry[0]), (err, buf) => {
     if (err) { res.writeHead(404); return res.end('Not found'); }
-    res.writeHead(200, { 'Content-Type': entry[1], 'Cache-Control': 'no-store' });
+    res.writeHead(200, { 'Content-Type': entry[1], 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
     res.end(buf);
   });
 });

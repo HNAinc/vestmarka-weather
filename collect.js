@@ -146,14 +146,96 @@ async function refreshYr(force) {
   return issued;
 }
 
+// Public, stable JSON API (static files served by GitHub Pages with CORS *).
+// Contains no generation timestamp so unchanged data produces no git diff.
+const API_DIR = path.join(__dirname, 'api', 'v1');
+const API_HOURS = 7 * 24;
+const SOURCES = {
+  station: 'Ecowitt station at Vestmarka skianlegg via webkamera.jardar.no (Jardar IL)',
+  forecast: 'MET Norway / yr.no (CC BY 4.0)',
+};
+const UNITS = { temp: '°C', wb: '°C', dew: '°C', feels: '°C', hum: '%', wind: 'm/s', gust: 'm/s', dir: '°', press: 'hPa (sea level)', pressAbs: 'hPa (station)', rain: 'mm (daily total)', rainRate: 'mm/h' };
+const MEAN_KEYS = ['temp', 'hum', 'dew', 'feels', 'wb', 'wbStull', 'wind', 'gust', 'press', 'pressAbs', 'rainRate'];
+
+function readStationSamples(sinceMs) {
+  let txt;
+  try { txt = fs.readFileSync(STATION_FILE, 'utf8'); } catch { return []; }
+  const out = [];
+  for (const line of txt.split('\n')) {
+    if (!line) continue;
+    try { const s = JSON.parse(line); if (s.t >= sinceMs) out.push(s); } catch { /* skip bad line */ }
+  }
+  return out;
+}
+
+function hourlyMeans(samples) {
+  const buckets = new Map();
+  for (const s of samples) {
+    const h = Math.floor(s.t / HOUR) * HOUR;
+    if (!buckets.has(h)) buckets.set(h, []);
+    buckets.get(h).push(s);
+  }
+  return [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([h, arr]) => {
+    const row = { time: new Date(h).toISOString(), samples: arr.length };
+    for (const k of MEAN_KEYS) {
+      const v = arr.map(s => s[k]).filter(x => x != null && Number.isFinite(x));
+      row[k] = v.length ? round(v.reduce((a, b) => a + b, 0) / v.length, 2) : null;
+    }
+    const d = arr.map(s => s.dir).filter(x => x != null && Number.isFinite(x));
+    row.dir = d.length ? Math.round((Math.atan2(
+      d.reduce((a, x) => a + Math.sin(x * Math.PI / 180), 0),
+      d.reduce((a, x) => a + Math.cos(x * Math.PI / 180), 0)) * 180 / Math.PI + 360) % 360) : null;
+    const rain = arr.map(s => s.rain).filter(x => x != null && Number.isFinite(x));
+    row.rain = rain.length ? Math.max(...rain) : null;
+    return row;
+  });
+}
+
+function writeApi() {
+  const samples = readStationSamples(Date.now() - API_HOURS * HOUR);
+  if (!samples.length) return;
+  const last = samples[samples.length - 1];
+  const { t, ...obs } = last;
+  const yr = readJson(YR_LATEST_FILE, null);
+  const yrc = yr && yr.current;
+  const forecastNow = yrc ? {
+    issued_at: yrc.created,
+    temp: yrc.temperature && yrc.temperature.value,
+    feels: yrc.temperature && yrc.temperature.feelsLike,
+    wind: yrc.wind && yrc.wind.speed,
+    gust: yrc.wind && yrc.wind.gust,
+    dir: yrc.wind && yrc.wind.direction,
+    precip: yrc.precipitation && yrc.precipitation.value,
+    symbol: yrc.symbolCode && yrc.symbolCode.next1Hour,
+  } : null;
+  fs.mkdirSync(API_DIR, { recursive: true });
+  const write = (name, obj) => fs.writeFileSync(path.join(API_DIR, name), JSON.stringify(obj, null, 1) + '\n');
+  write('latest.json', {
+    location: 'Vestmarka skianlegg',
+    observed_at: new Date(t).toISOString(),
+    units: UNITS,
+    observation: obs,
+    forecast_now: forecastNow,
+    sources: SOURCES,
+  });
+  write('observations.json', {
+    location: 'Vestmarka skianlegg',
+    interval: 'hourly mean (UTC hour start)',
+    units: UNITS,
+    hours: hourlyMeans(samples),
+    sources: SOURCES,
+  });
+}
+
 async function tick() {
   const results = await Promise.allSettled([sampleStation(), refreshYr(false)]);
   let failed = false;
   for (const r of results) if (r.status === 'rejected') { failed = true; console.error(r.reason.message); }
+  try { writeApi(); } catch (e) { failed = true; console.error('api:', e.message); }
   return !failed;
 }
 
-module.exports = { tick, sampleStation, refreshYr, DATA_DIR };
+module.exports = { tick, sampleStation, refreshYr, writeApi, DATA_DIR };
 
 if (require.main === module) {
   tick().then(ok => process.exit(ok ? 0 : 1));

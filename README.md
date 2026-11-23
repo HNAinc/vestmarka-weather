@@ -16,6 +16,19 @@ history accumulates in [`data/`](data/):
 The dashboard ([`index.html`](index.html)) is fully static: it fetches those files
 and computes all statistics and corrections in the browser.
 
+## JSON API (for other dashboards)
+
+Static JSON, updated by the collector, served with CORS enabled on GitHub Pages
+(`https://<user>.github.io/<repo>/api/v1/...`):
+
+- [`api/v1/latest.json`](api/v1/latest.json) – latest station observation (`observed_at` in ISO UTC,
+  metric units, wet bulb included) plus yr.no's current-hour values
+- [`api/v1/observations.json`](api/v1/observations.json) – hourly means for the last 7 days
+
+Units are listed in each file under `units`. Please credit the sources listed under `sources`
+and poll no more often than every 5–10 minutes. The raw files in `data/` are also public
+but their format may change; `api/v1` is the stable contract.
+
 ## Hosted on GitHub (free)
 
 1. Create a **public** GitHub repository and push this folder to it.

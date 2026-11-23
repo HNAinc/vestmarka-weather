@@ -1,0 +1,58 @@
+{
+ "location": "Vestmarka skianlegg",
+ "interval": "hourly mean (UTC hour start)",
+ "units": {
+  "temp": "°C",
+  "wb": "°C",
+  "dew": "°C",
+  "feels": "°C",
+  "hum": "%",
+  "wind": "m/s",
+  "gust": "m/s",
+  "dir": "°",
+  "press": "hPa (sea level)",
+  "pressAbs": "hPa (station)",
+  "rain": "mm (daily total)",
+  "rainRate": "mm/h"
+ },
+ "hours": [
+  {
+   "time": "2026-11-23T07:00:00.000Z",
+   "samples": 8,
+   "temp": -2.77,
+   "hum": 66.75,
+   "dew": -8.08,
+   "feels": -3.37,
+   "wb": -4.68,
+   "wbStull": null,
+   "wind": 1.25,
+   "gust": 1.84,
+   "press": 1014.9,
+   "pressAbs": 992.96,
+   "rainRate": 0,
+   "dir": 310,
+   "rain": 0
+  },
+  {
+   "time": "2026-11-23T08:00:00.000Z",
+   "samples": 11,
+   "temp": -2.43,
+   "hum": 63.18,
+   "dew": -8.47,
+   "feels": -3.32,
+   "wb": -4.3,
+   "wbStull": -4.99,
+   "wind": 1.03,
+   "gust": 1.62,
+   "press": 1015.24,
+   "pressAbs": 993.24,
+   "rainRate": 0,
+   "dir": 327,
+   "rain": 0
+  }
+ ],
+ "sources": {
+  "station": "Ecowitt station at Vestmarka skianlegg via webkamera.jardar.no (Jardar IL)",
+  "forecast": "MET Norway / yr.no (CC BY 4.0)"
+ }
+}
