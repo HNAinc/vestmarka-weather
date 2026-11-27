@@ -1905,7 +1905,7 @@
   },
   {
    "time": "2026-11-27T22:00:00.000Z",
-   "samples": 1,
+   "samples": 2,
    "temp": -3.5,
    "hum": 97,
    "dew": -3.89,
@@ -1914,10 +1914,10 @@
    "wbStull": -3.88,
    "wind": 0,
    "gust": 0,
-   "press": 1027.1,
-   "pressAbs": 1005.1,
+   "press": 1027.25,
+   "pressAbs": 1005.25,
    "rainRate": 0,
-   "dir": 333,
+   "dir": 321,
    "rain": 0
   }
  ],
