@@ -1579,6 +1579,23 @@
    "rainRate": 0,
    "dir": 294,
    "rain": 0
+  },
+  {
+   "time": "2026-11-27T03:00:00.000Z",
+   "samples": 1,
+   "temp": -6.89,
+   "hum": 94,
+   "dew": -7.67,
+   "feels": -6.89,
+   "wb": -7.12,
+   "wbStull": -7.47,
+   "wind": 0.89,
+   "gust": 2.01,
+   "press": 1022.7,
+   "pressAbs": 1000.7,
+   "rainRate": 0,
+   "dir": 270,
+   "rain": 0
   }
  ],
  "sources": {
