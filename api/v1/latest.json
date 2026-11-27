@@ -1,6 +1,6 @@
 {
  "location": "Vestmarka skianlegg",
- "observed_at": "2026-11-27T22:30:18.000Z",
+ "observed_at": "2026-11-27T23:00:10.000Z",
  "units": {
   "temp": "°C",
   "wb": "°C",
@@ -16,27 +16,27 @@
   "rainRate": "mm/h"
  },
  "observation": {
-  "temp": -3.5,
+  "temp": -3.39,
   "hum": 97,
-  "dew": -3.89,
-  "feels": -3.5,
-  "wb": -3.64,
-  "wbStull": -3.88,
+  "dew": -3.78,
+  "feels": -3.39,
+  "wb": -3.53,
+  "wbStull": -3.77,
   "wind": 0,
   "gust": 0,
-  "dir": 309,
+  "dir": 321,
   "press": 1027.4,
   "pressAbs": 1005.4,
   "rain": 0,
   "rainRate": 0
  },
  "forecast_now": {
-  "issued_at": "2026-11-27T23:27:42+01:00",
+  "issued_at": "2026-11-27T23:57:38+01:00",
   "temp": -2.8,
   "feels": -2.8,
   "wind": 0.6,
   "gust": 1.5,
-  "dir": 314,
+  "dir": 321,
   "precip": 0,
   "symbol": "cloudy"
  },
