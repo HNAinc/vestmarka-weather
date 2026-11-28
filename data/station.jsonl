@@ -294,3 +294,4 @@
 {"t":1795876234000,"temp":-2,"hum":99,"dew":-2.11,"feels":-2,"wb":-2.05,"wbStull":-2.22,"wind":0,"gust":0,"dir":315,"press":1025.7,"pressAbs":1003.7,"rain":0,"rainRate":0}
 {"t":1795878026000,"temp":-2,"hum":99,"dew":-2.11,"feels":-2,"wb":-2.05,"wbStull":-2.22,"wind":0.09,"gust":0.49,"dir":316,"press":1025.7,"pressAbs":1003.7,"rain":0,"rainRate":0}
 {"t":1795879818000,"temp":-1.89,"hum":99,"dew":-2,"feels":-1.89,"wb":-1.94,"wbStull":-2.11,"wind":0,"gust":0,"dir":315,"press":1025.4,"pressAbs":1003.4,"rain":0,"rainRate":0}
+{"t":1795881626000,"temp":-1.72,"hum":99,"dew":-1.83,"feels":-1.72,"wb":-1.77,"wbStull":-1.94,"wind":0,"gust":0,"dir":332,"press":1025.1,"pressAbs":1003,"rain":0,"rainRate":0}
